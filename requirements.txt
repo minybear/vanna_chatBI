@@ -1,0 +1,6 @@
+vanna[mysql,chromadb,openai]
+fastapi
+uvicorn
+pymysql
+python-dotenv
+httpx
