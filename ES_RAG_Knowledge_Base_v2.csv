@@ -1,0 +1,694 @@
+类型,内容,用户问题示例,业务标签
+documentation,"## 用户查询场景与表映射
+
+### 查询用户/副卡相关
+- 问题：'查询激活的副卡' / '有多少活跃用户' / '查询某个用户的副卡'
+- 主表：tbl_watch_subscription
+- 关键字段：imsi, msisdn, activation_status, primary_imsi
+- 常用条件：activation_status='Active'
+
+### 查询VoLTE/VoWiFi业务
+- 问题：'VoLTE开通情况' / 'VoWiFi已启用的用户' / '业务开通失败的用户'
+- 主表：tbl_volte_service, tbl_vowifi_service
+- 关键字段：imsi, msisdn, provisioning_status
+- 常用条件：provisioning_status=6100(已启用), 6101(未启用), 6102(失败), 6103(办理中)
+
+### 查询鉴权/认证相关
+- 问题：'鉴权失败的用户' / 'AAA认证异常' / '最近登录失败次数'
+- 主表：auth_log (db_stat)
+- 关键字段：imsi, result_code, auth_type, create_at
+- 常用条件：result_code NOT IN (0, -1, 1001) 表示失败
+
+### 查询业务统计指标
+- 问题：'今天的开通成功率' / '最近一小时的请求量' / 'AAA鉴权成功率'
+- 主表：stat_min, stat_hour (db_stat)
+- 关键字段：measure_type, collect_time, value
+- 时间格式：collect_time='yyyyMMddHHmm'或'yyyyMMddHH'
+
+### 查询业务日志/操作记录
+- 问题：'某用户的操作记录' / '最近的开通记录' / '失败的业务操作'
+- 主表：biz_watch_log (db_provision)
+- 关键字段：imsi, msisdn, action, result, create_at
+- 常用条件：result='success'/'fail'",如何知道用户问题对应哪个表,"表映射,场景识别,查询定位"
+documentation,"## 核心表字段映射
+
+### tbl_watch_subscription (用户订阅表)
+**用户标识字段：**
+- imsi: 副卡IMSI (varchar(64))
+- msisdn: 副卡手机号 (varchar(64))
+- iccid: 副卡ICCID (varchar(20))
+- eid: 设备EID (varchar(64))
+
+**主卡关联字段：**
+- primary_imsi: 主卡IMSI
+- primary_msisdn: 主卡手机号
+- primary_iccid: 主卡ICCID
+
+**状态字段：**
+- activation_status: 激活状态 (varchar(32))
+  * 取值：'New', 'Active', 'Inactive', 'In-Progress', 'Unusable', 'Pending-Profile-Release'
+  * 常用查询：='Active' 表示已激活
+- service_type: 卡类型 (int(2))
+  * 0=独立号, 1=一号多端
+- iccid_status: 码号状态 (varchar(16))
+  * 'Available', 'Installed', 'Released'等
+- provision_status: eSIM配置状态 (varchar(32))
+  * 'Provision-Completed', 'Deprovision-Completed'
+
+**时间字段：**
+- create_at: 创建时间 (bigint毫秒时间戳)
+- update_at: 更新时间 (bigint毫秒时间戳)
+- start_time: 开通成功时间 (bigint毫秒时间戳)
+- end_time: 注销时间 (bigint毫秒时间戳)
+
+**索引字段：** imsi, msisdn, primary_imsi都有索引，适合WHERE条件",tbl_watch_subscription表有哪些字段,"表结构,字段映射,用户订阅表"
+documentation,"## 核心表字段映射
+
+### tbl_volte_service (VoLTE业务表)
+**标识字段：**
+- imsi: 用户IMSI (varchar(15), UNIQUE)
+- msisdn: 手机号 (varchar(20))
+- iccid: ICCID (varchar(20))
+
+**业务状态字段：**
+- provisioning_status: 业务启用状态 (int(11))
+  * 6100: 已启用
+  * 6101: 未启用
+  * 6102: 启用失败
+  * 6103: 办理中
+  * NULL: 未知状态
+
+**时间字段：**
+- create_at: 创建时间 (datetime)
+- update_at: 更新时间 (datetime)
+
+**查询示例：**
+- WHERE provisioning_status = 6100 -- 查询已启用
+- WHERE provisioning_status IN (6100, 6103) -- 已启用或办理中
+- WHERE provisioning_status = 6102 -- 查询失败",VoLTE表字段说明,"VoLTE,表结构,业务状态"
+documentation,"## 核心表字段映射
+
+### tbl_vowifi_service (VoWiFi业务表)
+**标识字段：**
+- imsi: 用户IMSI (varchar(15), UNIQUE)
+- msisdn: 手机号 (varchar(20))
+- iccid: ICCID (varchar(20))
+
+**业务状态字段：**
+- provisioning_status: 业务配置状态 (int(11))
+  * 数据库存储provisioningCode，返回给UE的是entitlementCode
+  * 0 → 返回6101: 未预配Wi-Fi呼叫服务 (SERVICE_NOT_PROVISIONED)
+  * 1 → 返回6100: 已预配Wi-Fi呼叫服务 (SERVICE_PROVISIONED)
+  * 2 → 返回null: 不需要 (NOT_REQUIRED，默认值)
+  * 3 → 返回6103: 预配进行中 (IN_PROGRESSING)
+  
+**VoWiFi特有字段：**
+- tc_status: T&C条款状态 (tinyint(1))
+  * 指示用户是否已接受运营商的条款和条件
+  * 0: T&Cs not available (条款不可用)
+  * 1: T&Cs available (条款可用/用户已同意)
+  * 2: T&Cs not required (不需要条款)
+  * 3: In-Progress (进行中)
+  
+- address_status: 紧急地址状态 (tinyint(1))
+  * 指示设备是否存在注册的紧急位置
+  * 0: Address not available (地址不可用/未收集)
+  * 1: Address available (地址可用/已收集)
+  * 2: Address not required (地址不需要，DTAC运营商默认值)
+  * 3: In-Progress (进行中)
+
+**查询示例：**
+- WHERE provisioning_status = 1 -- 已预配(数据库存储值)
+- WHERE provisioning_status = 1 AND tc_status = 1 -- 已预配且用户已同意条款
+- WHERE provisioning_status IN (0, 3) -- 未预配或进行中
+- WHERE address_status = 2 -- 不需要收集地址(DTAC运营商)",VoWiFi表字段说明,"VoWiFi,表结构,TC状态,地址状态"
+documentation,"## 核心表字段映射
+
+### auth_log (AAA鉴权日志表, db_stat数据库)
+**用户标识：**
+- imsi: 用户IMSI (varchar(20), 有索引)
+- subscriber_id: 订阅者ID (varchar(64))
+
+**鉴权结果：**
+- result_code: 结果码 (int(11), 有索引)
+  * 0: 成功
+  * -1: 特殊状态(不计入统计)
+  * 1001: 特殊状态(不计入统计)
+  * 其他值: 失败
+- result_desc: 结果描述 (varchar(128))
+- auth_type: 鉴权类型 (varchar(15), 有索引)
+
+**时间字段：**
+- create_at: 创建时间 (datetime格式，非时间戳)
+
+**查询示例：**
+- WHERE result_code = 0 -- 成功
+- WHERE result_code NOT IN (-1, 0, 1001) -- 失败(用于统计)
+- WHERE create_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR) -- 最近1小时",auth_log表字段说明,"鉴权日志,AAA认证,失败分析"
+documentation,"## 核心表字段映射
+
+### stat_min/stat_hour (统计表, db_stat数据库)
+**统计维度：**
+- measure_type: 统计指标类型 (varchar(512), 有索引)
+  * 格式如：'AAA_AUTH_COUNT', 'VoLTE_SERVICE_ENABLE_SUCC_COUNT'
+- collect_time: 采集时间 (varchar(64), 有索引)
+  * stat_min格式：'yyyyMMddHHmm' 如'202412081430'
+  * stat_hour格式：'yyyyMMddHH' 如'2024120814'
+- label: 标签 (varchar(512))
+- value: 统计值 (bigint(20))
+
+**查询示例：**
+- WHERE measure_type = 'AAA_AUTH_COUNT' AND collect_time >= '202412080000'
+- WHERE collect_time >= DATE_FORMAT(NOW() - INTERVAL 1 HOUR, '%Y%m%d%H') -- 最近1小时
+- GROUP BY measure_type -- 按指标分组",统计表字段说明,"统计表,stat表,指标查询"
+documentation,"## 核心表字段映射
+
+### biz_watch_log (业务日志表, db_provision数据库)
+**用户标识：**
+- imsi: IMSI (varchar(15))
+- msisdn: 手机号 (varchar(20), 有索引)
+- iccid: ICCID (varchar(20))
+- primary_imsi: 主卡IMSI (varchar(15))
+
+**业务操作：**
+- action: 业务动作 (varchar(64))
+  * 常见值：'add', 'remove', 'activate', 'deactivate', 'transfer'
+- result: 执行结果 (varchar(20), NOT NULL)
+  * 'success': 成功
+  * 'fail': 失败
+- reason: 失败原因 (varchar(2048))
+- biz_name: 业务名称 (varchar(128))
+
+**时间字段：**
+- create_at: 创建时间 (bigint毫秒时间戳)
+
+**查询示例：**
+- WHERE result = 'fail' -- 失败记录
+- WHERE action = 'add' AND result = 'success' -- 成功开通
+- WHERE create_at >= UNIX_TIMESTAMP(NOW() - INTERVAL 1 DAY) * 1000 -- 最近1天",业务日志表字段说明,"操作日志,业务记录,biz_log"
+sql,"-- 查询激活的副卡用户
+SELECT 
+  imsi,
+  msisdn,
+  primary_imsi,
+  primary_msisdn,
+  service_type,
+  activation_status,
+  FROM_UNIXTIME(start_time/1000) as activation_time
+FROM tbl_watch_subscription
+WHERE activation_status = 'Active'
+ORDER BY start_time DESC",查询所有激活的副卡,"激活用户,副卡查询,Active"
+sql,"-- 统计最近30天的活跃用户数
+SELECT 
+  COUNT(DISTINCT imsi) as active_user_count
+FROM tbl_watch_subscription
+WHERE activation_status = 'Active'
+  AND FROM_UNIXTIME(update_at/1000) >= DATE_SUB(NOW(), INTERVAL 30 DAY)",最近30天有多少活跃用户,"活跃用户统计,30天,用户数量"
+sql,"-- 查询某主卡的所有副卡
+SELECT 
+  w.imsi,
+  w.msisdn,
+  w.activation_status,
+  w.service_type,
+  w.iccid_status,
+  FROM_UNIXTIME(w.create_at/1000) as create_time
+FROM tbl_watch_subscription w
+WHERE w.primary_imsi = ?
+ORDER BY w.create_at DESC",查询某个主卡下的所有副卡,"主副卡关联,副卡列表"
+sql,"-- 查询已启用VoLTE的用户
+SELECT 
+  imsi,
+  msisdn,
+  provisioning_status,
+  create_at,
+  update_at
+FROM tbl_volte_service
+WHERE provisioning_status = 6100",查询VoLTE已启用的用户,"VoLTE,已启用,6100"
+sql,"-- 查询VoLTE开通失败的用户
+SELECT 
+  imsi,
+  msisdn,
+  provisioning_status,
+  update_at
+FROM tbl_volte_service
+WHERE provisioning_status = 6102
+ORDER BY update_at DESC",VoLTE开通失败的用户有哪些,"VoLTE,开通失败,6102"
+sql,"-- 查询VoWiFi已预配且用户已同意条款的
+SELECT 
+  imsi,
+  msisdn,
+  provisioning_status,
+  tc_status,
+  address_status,
+  update_at
+FROM tbl_vowifi_service
+WHERE provisioning_status = 1
+  AND tc_status = 1",VoWiFi已预配且用户同意条款的,"VoWiFi,已预配,TC状态"
+sql,"-- 统计AAA鉴权成功率(最近1小时)
+SELECT 
+  SUM(CASE WHEN result_code = 0 THEN 1 ELSE 0 END) as success_count,
+  COUNT(*) as total_count,
+  ROUND(SUM(CASE WHEN result_code = 0 THEN 1 ELSE 0 END) / COUNT(*) * 100, 2) as success_rate
+FROM auth_log
+WHERE create_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)",最近1小时的AAA鉴权成功率,"鉴权成功率,AAA,成功率计算"
+sql,"-- 查询鉴权失败的用户(最近1小时,失败次数>3)
+SELECT 
+  imsi,
+  result_code,
+  COUNT(*) as fail_count
+FROM auth_log
+WHERE result_code NOT IN (-1, 0, 1001)
+  AND create_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
+GROUP BY imsi, result_code
+HAVING COUNT(*) > 3
+ORDER BY fail_count DESC",鉴权失败次数超过3次的用户,"鉴权失败,异常用户,失败次数"
+sql,"-- 查询指定统计指标(最近24小时)
+SELECT 
+  measure_type,
+  collect_time,
+  value,
+  label
+FROM stat_hour
+WHERE measure_type IN (
+    'AAA_AUTH_COUNT',
+    'AAA_AUTH_SUCC',
+    'VoLTE_SERVICE_ENABLE_SUCC_COUNT',
+    'VoLTE_SERVICE_ENABLE_FAIL_COUNT'
+  )
+  AND collect_time >= DATE_FORMAT(NOW() - INTERVAL 24 HOUR, '%Y%m%d%H')
+ORDER BY measure_type, collect_time DESC",查询最近24小时的业务指标,"统计指标,24小时,measure_type"
+sql,"-- 计算VoLTE开通成功率(最近1小时)
+SELECT 
+  SUM(CASE WHEN measure_type = 'VoLTE_SERVICE_ENABLE_SUCC_COUNT' THEN value ELSE 0 END) as success_count,
+  SUM(CASE WHEN measure_type = 'VoLTE_SERVICE_ENABLE_FAIL_COUNT' THEN value ELSE 0 END) as fail_count,
+  SUM(CASE WHEN measure_type = 'VoLTE_SERVICE_ENABLE_SUCC_COUNT' THEN value ELSE 0 END) + 
+  SUM(CASE WHEN measure_type = 'VoLTE_SERVICE_ENABLE_FAIL_COUNT' THEN value ELSE 0 END) as total_count,
+  ROUND(
+    SUM(CASE WHEN measure_type = 'VoLTE_SERVICE_ENABLE_SUCC_COUNT' THEN value ELSE 0 END) / 
+    (SUM(CASE WHEN measure_type = 'VoLTE_SERVICE_ENABLE_SUCC_COUNT' THEN value ELSE 0 END) + 
+     SUM(CASE WHEN measure_type = 'VoLTE_SERVICE_ENABLE_FAIL_COUNT' THEN value ELSE 0 END)) * 100, 
+    2
+  ) as success_rate
+FROM stat_hour
+WHERE measure_type IN ('VoLTE_SERVICE_ENABLE_SUCC_COUNT', 'VoLTE_SERVICE_ENABLE_FAIL_COUNT')
+  AND collect_time >= DATE_FORMAT(NOW() - INTERVAL 1 HOUR, '%Y%m%d%H')",VoLTE开通成功率是多少,"成功率,VoLTE,业务成功率"
+sql,"-- 查询用户的业务操作记录
+SELECT 
+  imsi,
+  msisdn,
+  action,
+  result,
+  reason,
+  FROM_UNIXTIME(create_at/1000) as operation_time
+FROM biz_watch_log
+WHERE (imsi = ? OR msisdn = ?)
+  AND create_at >= UNIX_TIMESTAMP(NOW() - INTERVAL 7 DAY) * 1000
+ORDER BY create_at DESC
+LIMIT 100",查询某用户最近7天的操作记录,"操作记录,业务日志,用户历史"
+sql,"-- 统计每天的副卡激活数量(最近7天)
+SELECT 
+  DATE(FROM_UNIXTIME(start_time/1000)) as activation_date,
+  COUNT(*) as activation_count
+FROM tbl_watch_subscription
+WHERE activation_status = 'Active'
+  AND FROM_UNIXTIME(start_time/1000) >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+GROUP BY DATE(FROM_UNIXTIME(start_time/1000))
+ORDER BY activation_date DESC",最近7天每天的副卡激活数量,"每日统计,激活数量,趋势"
+sql,"-- 统计主卡及其副卡数量
+SELECT 
+  primary_imsi,
+  primary_msisdn,
+  COUNT(*) as secondary_count,
+  SUM(CASE WHEN activation_status = 'Active' THEN 1 ELSE 0 END) as active_count,
+  SUM(CASE WHEN service_type = 1 THEN 1 ELSE 0 END) as multi_sim_count,
+  SUM(CASE WHEN service_type = 0 THEN 1 ELSE 0 END) as standalone_count
+FROM tbl_watch_subscription
+WHERE primary_imsi IS NOT NULL
+GROUP BY primary_imsi, primary_msisdn
+HAVING secondary_count > 0
+ORDER BY secondary_count DESC",统计每个主卡的副卡数量分布,"主卡统计,副卡分布,聚合统计"
+sql,"-- 主副卡关联查询(含业务状态)
+SELECT 
+  w.imsi as secondary_imsi,
+  w.msisdn as secondary_msisdn,
+  w.primary_imsi,
+  w.primary_msisdn,
+  w.activation_status,
+  w.service_type,
+  v.provisioning_status as volte_status,
+  wifi.provisioning_status as vowifi_status
+FROM tbl_watch_subscription w
+LEFT JOIN tbl_volte_service v ON w.imsi = v.imsi
+LEFT JOIN tbl_vowifi_service wifi ON w.imsi = wifi.imsi
+WHERE w.primary_imsi = ?
+ORDER BY w.create_at DESC",查询主卡关联的所有副卡及业务状态,"主副卡关联,多表JOIN,业务状态"
+sql,"-- 查询VoLTE已启用但VoWiFi未预配的用户
+SELECT 
+  v.imsi,
+  v.msisdn,
+  v.provisioning_status as volte_status,
+  COALESCE(w.provisioning_status, 0) as vowifi_status
+FROM tbl_volte_service v
+LEFT JOIN tbl_vowifi_service w ON v.imsi = w.imsi
+WHERE v.provisioning_status = 6100
+  AND (w.provisioning_status IS NULL OR w.provisioning_status != 1)",VoLTE已启用但VoWiFi未预配的用户,"业务对比,VoLTE,VoWiFi"
+sql,"-- 统计业务操作失败率(最近1天,按action分组)
+SELECT 
+  action,
+  COUNT(*) as total_count,
+  SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as success_count,
+  SUM(CASE WHEN result = 'fail' THEN 1 ELSE 0 END) as fail_count,
+  ROUND(SUM(CASE WHEN result = 'fail' THEN 1 ELSE 0 END) / COUNT(*) * 100, 2) as fail_rate
+FROM biz_watch_log
+WHERE create_at >= UNIX_TIMESTAMP(NOW() - INTERVAL 1 DAY) * 1000
+GROUP BY action
+HAVING total_count > 10
+ORDER BY fail_rate DESC",最近1天各业务操作的失败率,"失败率,业务操作,异常分析"
+sql,"-- 查询异常状态的副卡(Unusable)及最后操作
+SELECT 
+  w.imsi,
+  w.msisdn,
+  w.activation_status,
+  w.iccid_status,
+  FROM_UNIXTIME(w.update_at/1000) as last_update_time,
+  (SELECT action FROM biz_watch_log 
+   WHERE imsi = w.imsi 
+   ORDER BY create_at DESC LIMIT 1) as last_action,
+  (SELECT result FROM biz_watch_log 
+   WHERE imsi = w.imsi 
+   ORDER BY create_at DESC LIMIT 1) as last_result
+FROM tbl_watch_subscription w
+WHERE w.activation_status = 'Unusable'
+ORDER BY w.update_at DESC",查询异常状态的副卡及原因,"异常状态,Unusable,故障分析"
+documentation,"## 常见查询模式与SQL模板
+
+### 时间范围查询
+**毫秒时间戳字段 (tbl_watch_subscription, biz_watch_log):**
+```sql
+WHERE create_at >= UNIX_TIMESTAMP(NOW() - INTERVAL 1 DAY) * 1000
+WHERE FROM_UNIXTIME(create_at/1000) >= '2024-12-01'
+WHERE DATE(FROM_UNIXTIME(create_at/1000)) = CURDATE()
+```
+
+**datetime字段 (tbl_volte_service, auth_log):**
+```sql
+WHERE create_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
+WHERE create_at >= '2024-12-01 00:00:00'
+WHERE DATE(create_at) = CURDATE()
+```
+
+**格式化时间字符串 (stat_min, stat_hour):**
+```sql
+WHERE collect_time >= DATE_FORMAT(NOW() - INTERVAL 1 HOUR, '%Y%m%d%H')
+WHERE collect_time >= '202412010000' -- yyyyMMddHHmm
+WHERE collect_time LIKE '20241201%' -- 某一天
+```",时间条件如何写,"时间查询,时间戳转换,日期过滤"
+documentation,"## 常见查询模式与SQL模板
+
+### 主副卡关联查询
+**查询主卡的所有副卡:**
+```sql
+SELECT * FROM tbl_watch_subscription 
+WHERE primary_imsi = ? -- 主卡IMSI
+```
+
+**查询副卡关联的主卡信息:**
+```sql
+SELECT 
+  child.*, 
+  parent.msisdn as master_msisdn,
+  parent.activation_status as master_status
+FROM tbl_watch_subscription child
+LEFT JOIN tbl_watch_subscription parent 
+  ON child.primary_imsi = parent.imsi
+WHERE child.imsi = ?
+```
+
+**递归查询(查询用户及其所有关联用户的日志):**
+```sql
+SELECT * FROM biz_watch_log
+WHERE imsi IN (
+  SELECT IFNULL(primary_imsi, imsi) FROM tbl_watch_subscription WHERE imsi = ?
+) OR primary_imsi IN (
+  SELECT IFNULL(primary_imsi, imsi) FROM tbl_watch_subscription WHERE imsi = ?
+)
+```",主副卡如何关联查询,"主副卡,关联查询,JOIN"
+documentation,"## 常见查询模式与SQL模板
+
+### 成功率计算
+**基本成功率公式:**
+```sql
+SELECT 
+  SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as success_count,
+  COUNT(*) as total_count,
+  ROUND(SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) / COUNT(*) * 100, 2) as success_rate
+FROM biz_watch_log
+WHERE create_at >= ?
+```
+
+**从统计表计算成功率:**
+```sql
+SELECT 
+  SUM(CASE WHEN measure_type LIKE '%SUCC%' THEN value ELSE 0 END) as success,
+  SUM(CASE WHEN measure_type LIKE '%FAIL%' THEN value ELSE 0 END) as fail,
+  ROUND(
+    SUM(CASE WHEN measure_type LIKE '%SUCC%' THEN value ELSE 0 END) / 
+    (SUM(value)) * 100, 2
+  ) as success_rate
+FROM stat_hour
+WHERE measure_type IN ('XXX_SUCC_COUNT', 'XXX_FAIL_COUNT')
+  AND collect_time >= ?
+```",如何计算成功率,"成功率,百分比,统计计算"
+documentation,"## 常见查询模式与SQL模板
+
+### 统计和聚合
+**按天统计:**
+```sql
+SELECT 
+  DATE(FROM_UNIXTIME(create_at/1000)) as stat_date,
+  COUNT(*) as count
+FROM tbl_watch_subscription
+WHERE create_at >= ?
+GROUP BY DATE(FROM_UNIXTIME(create_at/1000))
+ORDER BY stat_date DESC
+```
+
+**按状态分组统计:**
+```sql
+SELECT 
+  activation_status,
+  COUNT(*) as count,
+  COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as percentage
+FROM tbl_watch_subscription
+GROUP BY activation_status
+ORDER BY count DESC
+```
+
+**TOP N查询:**
+```sql
+SELECT imsi, COUNT(*) as count
+FROM biz_watch_log
+WHERE create_at >= ?
+GROUP BY imsi
+ORDER BY count DESC
+LIMIT 10
+```",如何做统计和排行,"统计,聚合,TOP N"
+documentation,"## 重要业务规则(影响SQL生成)
+
+### 鉴权失败判断规则
+- result_code = 0: 成功
+- result_code IN (-1, 1001): 不计入统计的特殊状态
+- result_code NOT IN (-1, 0, 1001): 失败
+
+**SQL示例:**
+```sql
+WHERE result_code NOT IN (-1, 0, 1001) -- 查询失败
+WHERE result_code = 0 -- 查询成功
+```
+
+### 活跃用户定义
+- activation_status = 'Active'
+- 且 update_at 在最近30天内
+- 或 最近30天有成功的鉴权记录
+
+**SQL示例:**
+```sql
+WHERE activation_status = 'Active'
+  AND FROM_UNIXTIME(update_at/1000) >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+```
+
+### VoWiFi业务状态判断
+**重要：VoWiFi的provisioning_status存储的是provisioningCode，不是entitlementCode**
+- 数据库查询使用: 0=未预配, 1=已预配, 2=不需要, 3=进行中
+- 返回给UE的entitlementCode: 6101=未预配, 6100=已预配, null=不需要, 6103=进行中
+- VoLTE的provisioning_status直接存储entitlementCode: 6100, 6101, 6102, 6103
+
+**SQL示例:**
+```sql
+-- VoWiFi查询(使用provisioningCode)
+WHERE provisioning_status = 1 -- 已预配
+WHERE provisioning_status IN (1, 3) -- 已预配或进行中
+WHERE provisioning_status = 0 -- 未预配
+
+-- VoLTE查询(使用entitlementCode)
+WHERE provisioning_status = 6100 -- 已启用
+WHERE provisioning_status IN (6100, 6103) -- 已启用或办理中
+WHERE provisioning_status = 6101 -- 未启用
+
+-- 副卡激活状态
+WHERE activation_status = 'Active' -- 已激活
+WHERE activation_status = 'In-Progress' -- 激活中
+```",哪些业务规则影响SQL写法,"业务规则,SQL生成,判断条件,VoWiFi特殊规则"
+documentation,"## 统计指标measure_type完整列表
+
+### UE交互类 (UE_ES_开头)
+- UE_ES_INTERACT_COUNT: UE到ES总请求次数
+- UE_ES_GET_SIM_STATUS_REQ_SUCC_COUNT: Multi-SIM查询成功
+- UE_ES_GET_SIM_STATUS_REQ_FAIL_COUNT: Multi-SIM查询失败
+- UE_ES_SIGN_UP_FOR_SIM_STATUS_REQ_SUCC_COUNT: Multi-SIM注册成功
+- UE_ES_SIGN_UP_FOR_SIM_STATUS_REQ_FAIL_COUNT: Multi-SIM注册失败
+- UE_ES_GET_PHONE_NUMBER_REQ_SUCC_COUNT: GetPhoneNumber成功
+- UE_ES_GET_PHONE_NUMBER_REQ_FAIL_COUNT: GetPhoneNumber失败
+- UE_ES_GET_PHONE_SERVICES_ACCOUNT_STATUS_REQ_SUCC_COUNT: VoWiFi查询成功
+- UE_ES_GET_PHONE_SERVICES_ACCOUNT_STATUS_REQ_FAIL_COUNT: VoWiFi查询失败
+
+### AAA鉴权类
+- AAA_AUTH_COUNT: AAA鉴权总次数
+- AAA_AUTH_SUCC: AAA鉴权成功次数
+
+### VoLTE业务类
+- VoLTE_SERVICE_QUERY_SUCC_COUNT: VoLTE查询成功
+- VoLTE_SERVICE_QUERY_FAIL_COUNT: VoLTE查询失败
+- VoLTE_SERVICE_ENABLE_SUCC_COUNT: VoLTE启用成功
+- VoLTE_SERVICE_ENABLE_FAIL_COUNT: VoLTE启用失败
+
+### VoWiFi业务类
+- VoWIFI_SERVICE_QUERY_SUCC_COUNT: VoWiFi查询成功
+- VoWIFI_SERVICE_QUERY_FAIL_COUNT: VoWiFi查询失败
+
+### SOAP通知类
+- SOAP_NOTIFY_MUTIL_SIM_ADD_SUCC_COUNT: Multi-SIM开通成功通知
+- SOAP_NOTIFY_MUTIL_SIM_REMOVE_SUCC_COUNT: Multi-SIM注销成功通知
+- SOAP_NOTIFY_LINKED_SIM_ADD_SUCC_COUNT: 独立号开通成功通知
+- SOAP_NOTIFY_LINKED_SIM_REMOVE_SUCC_COUNT: 独立号注销成功通知
+
+### eSIM Client类
+- ESIM_CLIENT_CONFIRM_ORDER_REQ_SUCC_COUNT: ConfirmOrder成功
+- ESIM_CLIENT_DOWNLOAD_ORDER_REQ_SUCC_COUNT: DownloadOrder成功
+- ESIM_CLIENT_RELEASE_ORDER_REQ_SUCC_COUNT: ReleaseOrder成功
+
+**查询示例:**
+```sql
+WHERE measure_type = 'AAA_AUTH_COUNT'
+WHERE measure_type LIKE 'VoLTE%' -- 所有VoLTE相关指标
+WHERE measure_type LIKE '%SUCC%' -- 所有成功类指标
+```",measure_type都有哪些值,"统计指标,measure_type,指标列表"
+ddl,"-- db_provision.tbl_watch_subscription (用户订阅表)
+CREATE TABLE `tbl_watch_subscription` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(64) DEFAULT NULL,
+  `msisdn` varchar(64) DEFAULT NULL,
+  `iccid` varchar(20) DEFAULT NULL,
+  `eid` varchar(64) DEFAULT NULL,
+  `primary_imsi` varchar(64) DEFAULT NULL,
+  `primary_msisdn` varchar(64) DEFAULT NULL,
+  `primary_iccid` varchar(64) DEFAULT NULL,
+  `activation_status` varchar(32) DEFAULT NULL,
+  `service_type` int(2) DEFAULT NULL,
+  `provision_status` varchar(32) DEFAULT NULL,
+  `iccid_status` varchar(16) DEFAULT NULL,
+  `create_at` bigint(20) DEFAULT NULL,
+  `update_at` bigint(20) DEFAULT NULL,
+  `start_time` bigint(20) DEFAULT NULL,
+  `end_time` bigint(20) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `imsi_index` (`imsi`),
+  KEY `msisdn_index` (`msisdn`),
+  KEY `parent_imsi_index` (`primary_imsi`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",,用户订阅表DDL
+ddl,"-- db_provision.tbl_volte_service (VoLTE业务表)
+CREATE TABLE `tbl_volte_service` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(15) NOT NULL,
+  `msisdn` varchar(20) DEFAULT NULL,
+  `iccid` varchar(20) DEFAULT NULL,
+  `provisioning_status` int(11) DEFAULT NULL,
+  `create_at` datetime DEFAULT current_timestamp(),
+  `update_at` datetime DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_imsi` (`imsi`),
+  KEY `index_msisdn` (`msisdn`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",,VoLTE业务表DDL
+ddl,"-- db_provision.tbl_vowifi_service (VoWiFi业务表)
+CREATE TABLE `tbl_vowifi_service` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(15) NOT NULL,
+  `msisdn` varchar(20) DEFAULT NULL,
+  `iccid` varchar(20) DEFAULT NULL,
+  `provisioning_status` int(11) DEFAULT NULL,
+  `tc_status` tinyint(1) DEFAULT NULL,
+  `address_status` tinyint(1) DEFAULT NULL,
+  `create_at` datetime DEFAULT current_timestamp(),
+  `update_at` datetime DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_imsi` (`imsi`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",,VoWiFi业务表DDL
+ddl,"-- db_stat.auth_log (AAA鉴权日志表)
+CREATE TABLE `auth_log` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(20) DEFAULT NULL,
+  `subscriber_id` varchar(64) DEFAULT NULL,
+  `auth_type` varchar(15) DEFAULT NULL,
+  `result_code` int(11) DEFAULT NULL,
+  `result_desc` varchar(128) DEFAULT NULL,
+  `peer_realm` varchar(128) DEFAULT NULL,
+  `create_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `auth_imsi_index` (`imsi`),
+  KEY `auth_type_index` (`auth_type`),
+  KEY `auth_result_code` (`result_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",,AAA鉴权日志表DDL
+ddl,"-- db_stat.stat_min (按分钟统计表)
+CREATE TABLE `stat_min` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `measure_type` varchar(512) NOT NULL,
+  `collect_time` varchar(64) NOT NULL,
+  `value` bigint(20) DEFAULT NULL,
+  `label` varchar(512) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `measure_type_index` (`measure_type`),
+  KEY `collect_time_index` (`collect_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",,统计分钟表DDL
+ddl,"-- db_provision.biz_watch_log (业务日志表)
+CREATE TABLE `biz_watch_log` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(15) DEFAULT NULL,
+  `msisdn` varchar(20) DEFAULT NULL,
+  `primary_imsi` varchar(15) DEFAULT NULL,
+  `action` varchar(64) DEFAULT NULL,
+  `result` varchar(20) NOT NULL,
+  `reason` varchar(2048) DEFAULT NULL,
+  `create_at` bigint(20) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `msisdn_index` (`msisdn`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",,业务日志表DDL
+documentation,"## 数据库命名规范
+
+### 表命名
+- tbl_开头: 业务表 (如tbl_watch_subscription, tbl_volte_service)
+- 无前缀: 系统表/日志表 (如auth_log, biz_watch_log)
+- stat_开头: 统计表 (如stat_min, stat_hour)
+
+### 字段命名
+- _status结尾: 状态字段 (如activation_status, provisioning_status)
+- _at结尾: 时间字段 (如create_at, update_at)
+- primary_开头: 主卡相关字段 (如primary_imsi, primary_msisdn)
+- _count结尾: 计数字段 (在统计表中如measure_type)
+
+### 数据库分离
+- db_provision: 业务数据库 (用户、订阅、业务状态)
+- db_stat: 统计数据库 (统计指标、日志、trace)
+- db_mgmt: 管理数据库 (用户管理、权限)
+
+**跨库查询注意:** 需要指定完整表名如 db_stat.auth_log",数据库命名规范,"命名规范,数据库设计,表命名"
+

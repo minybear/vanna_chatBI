@@ -15,27 +15,8 @@ CARDINALITY_THRESHOLD = 20  # Max unique values to consider as an enum
 IGNORE_TABLES = ['auditlog', 'schema_migrations'] # Tables to skip
 IGNORE_COLUMNS = ['id', 'created_at', 'updated_at', 'password'] # Columns to skip
 
-# --- Vanna Setup (Copied from app.py) ---
-class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
-    def __init__(self, config=None):
-        ChromaDB_VectorStore.__init__(self, config=config)
-        client = OpenAI(
-            api_key=config['api_key'],
-            base_url=config['api_base']
-        )
-        vanna_config = config.copy()
-        if 'api_base' in vanna_config:
-            del vanna_config['api_base']
-        OpenAI_Chat.__init__(self, client=client, config=vanna_config)
-
-config = {
-    'api_key': os.getenv('ZHIPU_API_KEY'),
-    'model': os.getenv('ZHIPU_MODEL', 'glm-4'),
-    'api_base': os.getenv('ZHIPU_API_BASE'),
-    'path': './chroma_db'
-}
-
-vn = MyVanna(config=config)
+# --- Vanna Setup ---
+from app import vn
 
 # --- Database Connection ---
 def get_db_connection(db_name=None):
