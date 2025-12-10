@@ -229,6 +229,12 @@ def generate_sql(request: QuestionRequest):
 def run_sql(request: SqlRequest):
     df = vn.run_sql(sql=request.sql)
     
+    # 清理不符合 JSON 规范的浮点数值 (inf, -inf, nan)
+    # 将它们替换为 None，避免 JSON 序列化错误
+    import numpy as np
+    df = df.replace([np.inf, -np.inf], None)  # 无穷大替换为 None
+    df = df.replace({np.nan: None})  # NaN 替换为 None
+    
     # --- 新增可视化逻辑 ---
     chart_json = None
     if request.question:
