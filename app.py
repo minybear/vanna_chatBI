@@ -7,6 +7,7 @@ from vanna.legacy.chromadb import ChromaDB_VectorStore
 from vanna.legacy.ZhipuAI.ZhipuAI_embeddings import ZhipuAIEmbeddingFunction
 from fastapi import FastAPI, Response, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import pymysql
 from dotenv import load_dotenv
 import pandas as pd
@@ -34,6 +35,81 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
 
         # Initialize OpenAI_Chat with the client
         OpenAI_Chat.__init__(self, client=client, config=vanna_config)
+
+    def generate_sql_optimized(self, question: str, allow_llm_to_see_data=False, **kwargs):
+        """
+        Optimized version of generate_sql that returns both SQL and Explanation in a single pass.
+        """
+        # 1. Retrieve Context
+        question_sql_list = self.get_similar_question_sql(question, **kwargs)
+        ddl_list = self.get_related_ddl(question, **kwargs)
+        doc_list = self.get_related_documentation(question, **kwargs)
+
+        # 2. Construct Prompt
+        if self.config is not None:
+            initial_prompt = self.config.get("initial_prompt", None)
+        else:
+            initial_prompt = None
+
+        if initial_prompt is None:
+            initial_prompt = (
+                f"You are a {self.dialect} expert. "
+                + "Please help to generate a SQL query to answer the question. "
+                + "Your response should ONLY be based on the given context and follow the response guidelines and format instructions. "
+            )
+
+        initial_prompt = self.add_ddl_to_prompt(initial_prompt, ddl_list, max_tokens=self.max_tokens)
+
+        if self.static_documentation != "":
+            doc_list.append(self.static_documentation)
+
+        initial_prompt = self.add_documentation_to_prompt(initial_prompt, doc_list, max_tokens=self.max_tokens)
+
+        # Custom Guidelines for Single-Pass Explanation
+        initial_prompt += (
+            "===Response Guidelines \n"
+            "1. If the provided context is sufficient, please generate a valid SQL query. \n"
+            "2. **IMPORTANT**: You must provide a brief explanation (1-2 sentences) of what the query does. \n"
+            "3. Format your response as follows:\n"
+            "   Explanation: [Your explanation here]\n"
+            "   ```sql\n   [Your SQL here]\n   ```\n"
+            "4. If the provided context is almost sufficient but requires knowledge of a specific string in a particular column, please generate an intermediate SQL query to find the distinct strings in that column. Prepend the query with a comment saying intermediate_sql \n"
+            "5. If the provided context is insufficient, please explain why it can't be generated. \n"
+            f"6. Ensure that the output SQL is {self.dialect}-compliant and executable. \n"
+            "7. **CRITICAL for MySQL**: DO NOT use `UNIX_TIMESTAMP` with a format string (e.g., `UNIX_TIMESTAMP(col, '%Y-%m-%d')` is INVALID). `UNIX_TIMESTAMP()` only accepts 0 or 1 argument. To format a timestamp, use `DATE_FORMAT(FROM_UNIXTIME(timestamp_col/1000), '%Y-%m-%d')` (if ms) or `DATE_FORMAT(FROM_UNIXTIME(timestamp_col), '%Y-%m-%d')` (if seconds). \n"
+        )
+
+        message_log = [self.system_message(initial_prompt)]
+
+        for example in question_sql_list:
+            if example is not None and "question" in example and "sql" in example:
+                message_log.append(self.user_message(example["question"]))
+                message_log.append(self.assistant_message(example["sql"]))
+
+        message_log.append(self.user_message(question))
+
+        # 3. Submit Prompt
+        llm_response = self.submit_prompt(message_log, **kwargs)
+
+        # 4. Handle Intermediate SQL (Simplified for optimization)
+        if "intermediate_sql" in llm_response and allow_llm_to_see_data:
+            # If intermediate SQL is needed, we might have to do the standard flow or just return.
+            # For now, let's use the standard extract_sql to get the query, run it, and re-prompt.
+            # This is the slow path, but necessary for correctness if hit.
+            intermediate_sql = self.extract_sql(llm_response)
+            try:
+                df = self.run_sql(intermediate_sql)
+                # Re-prompt with data
+                message_log.append(self.assistant_message(llm_response))
+                message_log.append(self.user_message(
+                    f"The following is a pandas DataFrame with the results of the intermediate SQL query {intermediate_sql}: \n"
+                    + df.to_markdown()
+                ))
+                llm_response = self.submit_prompt(message_log, **kwargs)
+            except Exception as e:
+                return f"Error running intermediate SQL: {e}"
+
+        return llm_response
 
     def run_sql(self, sql: str, **kwargs):
         # Custom SQL Runner to handle SSL and Multi-DB
@@ -79,7 +155,8 @@ config = {
     'model': os.getenv('ZHIPU_MODEL', 'GLM-4.6'),
     'api_base': os.getenv('ZHIPU_API_BASE'),
     'path': './chroma_db', # Path for ChromaDB storage
-    'embedding_function': zhipu_embedding
+    'embedding_function': zhipu_embedding,
+    'dialect': 'MySQL' # 显式指定 MySQL 方言，防止 LLM 生成不兼容的 SQL 函数 (如 UNIX_TIMESTAMP 多参数)
 }
 
 # Initialize Vanna
@@ -87,6 +164,9 @@ vn = MyVanna(config=config)
 
 # Setup FastAPI
 app = FastAPI(title="Vanna ChatBI MVP")
+
+# Mount static files (for serving images)
+app.mount("/img", StaticFiles(directory="img"), name="img")
 
 # Import and Include Knowledge Base Router
 from knowledge_base_api import router as kb_router
@@ -159,71 +239,48 @@ def get_config():
 @app.post("/api/v0/generate_sql")
 def generate_sql(request: QuestionRequest):
     try:
-        # 1. Generate SQL using Vanna
-        # Allow LLM to see data for better SQL generation (e.g. finding distinct values)
-        raw_result = vn.generate_sql(question=request.question, allow_llm_to_see_data=True)
+        # 1. Generate SQL using Optimized Vanna Method (Single Pass for SQL + Explanation)
+        raw_result = vn.generate_sql_optimized(question=request.question, allow_llm_to_see_data=True)
 
-        # 2. Clean and Validate SQL
-        # Remove Markdown code blocks if present (e.g. ```sql ... ```)
-        clean_result = re.sub(r'^```sql\s*', '', raw_result, flags=re.IGNORECASE)
-        clean_result = re.sub(r'^```\s*', '', clean_result)
-        clean_result = re.sub(r'\s*```$', '', clean_result)
+        # 2. Parse Result to extract SQL and Explanation
+        # Expected format: "Explanation: ... ```sql ... ```"
+        
+        sql_match = re.search(r"```sql\s*(.*?)\s*```", raw_result, re.DOTALL | re.IGNORECASE)
+        if not sql_match:
+             sql_match = re.search(r"```\s*(.*?)\s*```", raw_result, re.DOTALL | re.IGNORECASE)
 
-        # Remove "intermediate_sql" marker if present
-        clean_result = re.sub(r'^intermediate_sql\s*', '', clean_result, flags=re.IGNORECASE)
+        if sql_match:
+            clean_sql = sql_match.group(1).strip()
+            
+            # Remove "intermediate_sql" marker if present
+            clean_sql = re.sub(r'^intermediate_sql\s*', '', clean_sql, flags=re.IGNORECASE)
+            
+            # Extract explanation (everything before the SQL block usually)
+            # Or look for "Explanation:" prefix
+            explanation = ""
+            explanation_match = re.search(r"Explanation:\s*(.*?)(?=```)", raw_result, re.DOTALL | re.IGNORECASE)
+            if explanation_match:
+                explanation = explanation_match.group(1).strip()
+            else:
+                # Fallback: Use text before code block
+                parts = raw_result.split("```")
+                if len(parts) > 0:
+                    explanation = parts[0].replace("Explanation:", "").strip()
+            
+            if not explanation:
+                explanation = "Here is the SQL query for your request."
 
-        # Remove SQL comments (lines starting with -- or #)
-        lines = clean_result.split('\n')
-        cleaned_lines = []
-        for line in lines:
-            # Remove inline comments
-            line_no_comment = re.sub(r'\s*--.*$', '', line)
-            line_no_comment = re.sub(r'\s*#.*$', '', line_no_comment)
-            if line_no_comment.strip():
-                cleaned_lines.append(line_no_comment)
-        clean_result = '\n'.join(cleaned_lines)
-
-        clean_result = clean_result.strip()
-
-        # Heuristic check: Must start with SELECT, WITH, DESCRIBE, SHOW
-        # Also check length to avoid short "I can't do that" responses being treated as SQL
-        upper_result = clean_result.upper()
-        valid_starts = ("SELECT", "WITH", "DESCRIBE", "SHOW")
-        is_sql = any(upper_result.startswith(s) for s in valid_starts) and len(clean_result) > 10
-
-        explanation = ""
-        if is_sql:
-            # 3. Generate Explanation (Human-in-the-loop / Business Friendly)
-            try:
-                # Use the existing client in vn to generate an explanation
-                explanation_prompt = [
-                    {"role": "system", "content": "You are a helpful business intelligence assistant. Your goal is to explain data queries to non-technical users."},
-                    {"role": "user", "content": f"The user asked: '{request.question}'.\nWe generated this SQL: \n{clean_result}\n\nPlease provide a brief, clear explanation of what this query does. Focus on the business logic. Do not mention specific table names or SQL keywords. Keep it under 2 sentences."}
-                ]
-
-                response = vn.client.chat.completions.create(
-                    model=config['model'],
-                    messages=explanation_prompt,
-                    max_tokens=150,
-                    temperature=0.7
-                )
-                explanation = response.choices[0].message.content.strip()
-            except Exception as e:
-                print(f"Error generating explanation: {e}")
-                explanation = "Here is the data based on your request." # Fallback
-
-        if is_sql:
             return {
-                "sql": clean_result,
+                "sql": clean_sql,
                 "is_sql": True,
                 "explanation": explanation
             }
         else:
-            # It's a conversational response or error
+            # No SQL found, treat as conversational response
             return {
                 "text": raw_result,
                 "is_sql": False,
-                "explanation": raw_result # Use the text itself as explanation
+                "explanation": raw_result
             }
 
     except Exception as e:
@@ -235,6 +292,7 @@ def generate_sql(request: QuestionRequest):
 @app.post("/api/v0/run_sql")
 def run_sql(request: SqlRequest):
     try:
+        print(f"Executing SQL: {request.sql}")  # Add logging to debug SQL errors
         df = vn.run_sql(sql=request.sql)
 
         # 清理不符合 JSON 规范的浮点数值 (inf, -inf, nan)
@@ -245,19 +303,20 @@ def run_sql(request: SqlRequest):
 
         # --- 新增可视化逻辑 ---
         chart_json = None
-        if request.question:
-            try:
-                # 1. 让 Vanna 生成绘图代码
-                plotly_code = vn.generate_plotly_code(question=request.question, sql=request.sql, df=df)
-
-                # 2. 执行代码获取 Figure 对象
-                fig = vn.get_plotly_figure(plotly_code=plotly_code, df=df)
-
-                # 3. 转为 JSON 字符串传给前端
-                if fig:
-                    chart_json = fig.to_json()
-            except Exception as e:
-                print(f"可视化生成失败: {e}")
+        # 性能优化：前端已实现智能图表生成 (ECharts)，后端不再生成 Plotly 代码，以节省 LLM 调用时间和 Token
+        # if request.question:
+        #     try:
+        #         # 1. 让 Vanna 生成绘图代码
+        #         plotly_code = vn.generate_plotly_code(question=request.question, sql=request.sql, df=df)
+        #
+        #         # 2. 执行代码获取 Figure 对象
+        #         fig = vn.get_plotly_figure(plotly_code=plotly_code, df=df)
+        #
+        #         # 3. 转为 JSON 字符串传给前端
+        #         if fig:
+        #             chart_json = fig.to_json()
+        #     except Exception as e:
+        #         print(f"可视化生成失败: {e}")
         # --------------------
 
         # Convert DataFrame to list of dicts for JSON response
@@ -311,6 +370,9 @@ def ui():
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
         <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <!-- 替换为 ECharts - 更现代化的图表库 -->
+        <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+        <!-- 备用: 保留Plotly以防兼容性问题 -->
         <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
         <style>
             :root {
@@ -373,8 +435,18 @@ def ui():
                 display: flex; align-items: center; justify-content: center;
                 flex-shrink: 0;
                 font-size: 18px;
+                overflow: hidden;
             }
-            .avatar.ai { background: rgba(21, 168, 168, 0.1); color: var(--vanna-teal); }
+            .avatar.ai { 
+                background: rgba(21, 168, 168, 0.1); 
+                color: var(--vanna-teal);
+                padding: 0;
+            }
+            .avatar.ai img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+            }
             .avatar.user { background: var(--vanna-navy); color: white; }
 
             .message-bubble {
@@ -415,6 +487,26 @@ def ui():
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
+            }
+            
+            .data-card-header .btn-group {
+                opacity: 0.7;
+                transition: opacity 0.2s;
+            }
+            
+            .data-card-header:hover .btn-group {
+                opacity: 1;
+            }
+            
+            .data-card-header .btn {
+                border-color: var(--vanna-border);
+                color: var(--vanna-text-dim);
+            }
+            
+            .data-card-header .btn:hover {
+                border-color: var(--vanna-teal);
+                color: var(--vanna-teal);
+                background: rgba(21, 168, 168, 0.05);
             }
 
             .data-card-title { font-size: 13px; font-weight: 600; color: var(--vanna-text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
@@ -528,7 +620,7 @@ def ui():
                     <div class="tab-pane fade show active" id="chat" role="tabpanel">
                         <div class="chat-container" id="chatBox">
                             <div class="message-wrapper ai">
-                                <div class="avatar ai"><i class="bi bi-robot"></i></div>
+                                <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
                                 <div class="message-bubble">
                                     Hello! I'm connected to your database. Ask me anything about your data!
                                 </div>
@@ -611,6 +703,7 @@ def ui():
         <script>
             let APP_CONFIG = { show_sql: false };
             let CHAT_HISTORY = {};
+            let CHART_INSTANCES = {}; // 存储ECharts实例
 
             window.onload = async () => {
                 try {
@@ -618,6 +711,750 @@ def ui():
                     APP_CONFIG = await res.json();
                 } catch (e) { console.error("Config error", e); }
             };
+
+            // ECharts 渲染函数 - 科技感主题
+            function renderECharts(container, chartJsonStr, resultData, columns, msgId) {
+                console.log('开始渲染ECharts', {resultData, columns});
+                
+                // 如果没有数据,直接使用Plotly
+                if (!resultData || resultData.length === 0 || !columns || columns.length === 0) {
+                    console.log('数据为空,使用Plotly渲染');
+                    throw new Error('No data for ECharts');
+                }
+                
+                // 智能检测图表类型和数据列
+                const echartsOption = smartGenerateChart(resultData, columns);
+                
+                // 动态计算容器高度
+                const dataLength = resultData.length;
+                const minHeight = Math.max(500, dataLength * 30 + 150);
+                container.style.height = minHeight + 'px';
+
+                // 初始化 ECharts
+                const chart = echarts.init(container, null, {
+                    renderer: 'canvas',
+                    useDirtyRect: false
+                });
+                
+                chart.setOption(echartsOption);
+                console.log('ECharts渲染成功', echartsOption);
+                
+                // 存储实例用于导出
+                CHART_INSTANCES[msgId] = chart;
+                
+                // 响应式
+                window.addEventListener('resize', () => {
+                    chart.resize();
+                });
+                
+                return chart;
+            }
+            
+            // 智能图表类型检测
+            // 检测是否为长格式时间序列数据 (例如: date, category, value)
+            function isLongFormatTimeSeries(resultData, columns) {
+                if (columns.length !== 3) return null;
+                
+                const [col1, col2, col3] = columns;
+                const col1Lower = col1.toLowerCase();
+                const col2Lower = col2.toLowerCase();
+                
+                // 第一列是日期/时间
+                const isDateColumn = col1Lower.match(/date|time|day|month|year|dt|stat|hour/);
+                // 第二列是分类/类型
+                const isCategoryColumn = col2Lower.match(/type|category|name|kind|group|measure/);
+                
+                if (isDateColumn && isCategoryColumn) {
+                    // 检查第一列的值是否看起来像日期
+                    const firstVal = resultData[0]?.[col1];
+                    if (firstVal) {
+                        const valStr = firstVal.toString();
+                        // 支持多种日期格式: YYYYMMDD, YYYY-MM-DD, YYYY/MM/DD
+                        if (valStr.match(/^\d{8}$/) || 
+                            valStr.match(/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/) ||
+                            valStr.match(/^\d{4}[-/]\d{1,2}/)) {
+                            return {dateCol: col1, categoryCol: col2, valueCol: col3};
+                        }
+                    }
+                }
+                
+                return null;
+            }
+            
+            // 转换长格式为宽格式 (date, category, value -> date, cat1, cat2, ...)
+            function transformLongToWide(resultData, dateCol, categoryCol, valueCol) {
+                // 1. 获取所有唯一的分类
+                const categories = [...new Set(resultData.map(row => row[categoryCol]))];
+                
+                // 2. 按日期分组
+                const dateGroups = {};
+                resultData.forEach(row => {
+                    const date = row[dateCol];
+                    if (!dateGroups[date]) {
+                        dateGroups[date] = {};
+                    }
+                    dateGroups[date][row[categoryCol]] = row[valueCol];
+                });
+                
+                // 3. 转换为宽格式
+                const wideData = Object.keys(dateGroups).map(date => {
+                    const row = {[dateCol]: date};
+                    categories.forEach(cat => {
+                        row[cat] = dateGroups[date][cat] || 0;
+                    });
+                    return row;
+                });
+                
+                // 4. 按日期排序
+                wideData.sort((a, b) => {
+                    const dateA = a[dateCol].toString();
+                    const dateB = b[dateCol].toString();
+                    return dateA.localeCompare(dateB);
+                });
+                
+                return {
+                    data: wideData,
+                    columns: [dateCol, ...categories]
+                };
+            }
+            
+            // 格式化日期 (20251110 -> 2025-11-10)
+            function formatDate(dateValue) {
+                const dateStr = dateValue.toString();
+                
+                // YYYYMMDD -> YYYY-MM-DD
+                if (dateStr.match(/^\d{8}$/)) {
+                    return dateStr.substring(0, 4) + '-' + 
+                           dateStr.substring(4, 6) + '-' + 
+                           dateStr.substring(6, 8);
+                }
+                
+                // YYYYMM -> YYYY-MM
+                if (dateStr.match(/^\d{6}$/)) {
+                    return dateStr.substring(0, 4) + '-' + dateStr.substring(4, 6);
+                }
+                
+                return dateStr;
+            }
+
+            function detectChartType(resultData, columns) {
+                const xColumn = columns[0];
+                const yColumns = columns.slice(1);
+                
+                // 规则0: 检查是否为长格式时间序列
+                const longFormat = isLongFormatTimeSeries(resultData, columns);
+                if (longFormat) {
+                    return 'line-long-format';
+                }
+                
+                // 规则1: 检查列名中的关键词
+                const columnNames = columns.join(' ').toLowerCase();
+                
+                // 趋势类关键词 (折线图)
+                if (columnNames.match(/trend|趋势|time|时间|date|日期|month|月|year|年|day|天|hour|小时/)) {
+                    // 检查X轴是否为日期或时间序列
+                    const firstVal = resultData[0]?.[xColumn];
+                    if (firstVal && (firstVal.toString().match(/\d{4}[-/]\d{1,2}[-/]\d{1,2}/) || 
+                                     firstVal.toString().match(/\d{4}[-/]\d{1,2}/) ||
+                                     firstVal.toString().match(/\d{8}/) ||
+                                     firstVal.toString().match(/\d{1,2}:\d{2}/))) {
+                        return 'line';
+                    }
+                }
+                
+                // 占比类关键词 (饼图)
+                if (columnNames.match(/percent|百分比|占比|比例|rate|率|proportion|份额|distribution|分布/) &&
+                    yColumns.length === 1 && resultData.length <= 10) {
+                    return 'pie';
+                }
+                
+                // 规则2: 根据数据特征判断
+                if (yColumns.length === 1) {
+                    const yData = resultData.map(row => Number(row[yColumns[0]]) || 0);
+                    const total = yData.reduce((a, b) => a + b, 0);
+                    
+                    // 如果所有值加起来接近100,可能是百分比 → 饼图
+                    if (total >= 95 && total <= 105 && resultData.length <= 8) {
+                        return 'pie';
+                    }
+                    
+                    // 如果数据点很多(>15),且有明显趋势 → 折线图
+                    if (resultData.length > 15) {
+                        return 'line';
+                    }
+                }
+                
+                // 规则3: 多系列数据 → 折线图(方便对比)
+                if (yColumns.length > 1 && resultData.length > 5) {
+                    return 'line';
+                }
+                
+                // 默认: 柱状图(最常用)
+                return 'bar';
+            }
+            
+            // 智能生成图表配置
+            function smartGenerateChart(resultData, columns) {
+                // 检测最佳图表类型
+                const chartType = detectChartType(resultData, columns);
+                console.log('智能选择图表类型:', chartType);
+                
+                // 处理长格式时间序列数据
+                if (chartType === 'line-long-format') {
+                    const longFormat = isLongFormatTimeSeries(resultData, columns);
+                    if (longFormat) {
+                        console.log('检测到长格式时间序列数据，正在转换...', longFormat);
+                        const transformed = transformLongToWide(
+                            resultData, 
+                            longFormat.dateCol, 
+                            longFormat.categoryCol, 
+                            longFormat.valueCol
+                        );
+                        
+                        console.log('转换后的数据:', transformed);
+                        
+                        // 格式化日期
+                        const formattedData = transformed.data.map(row => {
+                            const newRow = {...row};
+                            newRow[longFormat.dateCol] = formatDate(row[longFormat.dateCol]);
+                            return newRow;
+                        });
+                        
+                        // 使用转换后的宽格式数据生成折线图
+                        const xColumn = transformed.columns[0];
+                        const yColumns = transformed.columns.slice(1);
+                        const xAxisData = formattedData.map(row => row[xColumn]);
+                        
+                        return generateLineChart(formattedData, transformed.columns, xColumn, yColumns, xAxisData);
+                    }
+                }
+                
+                // 假设第一列是X轴(标签/类别),其他列是数值
+                const xColumn = columns[0];
+                const yColumns = columns.slice(1);
+                
+                // 提取X轴数据
+                const xAxisData = resultData.map(row => {
+                    let val = row[xColumn];
+                    // 尝试格式化日期
+                    if (val && val.toString().match(/^\d{8}$/)) {
+                        val = formatDate(val);
+                    }
+                    // 处理长标签
+                    if (val && typeof val === 'string' && val.length > 20) {
+                        return val.substring(0, 20) + '...';
+                    }
+                    return val !== null ? String(val) : '';
+                });
+                
+                // 根据图表类型生成不同配置
+                if (chartType === 'pie') {
+                    return generatePieChart(resultData, columns, xColumn, yColumns);
+                } else if (chartType === 'line') {
+                    return generateLineChart(resultData, columns, xColumn, yColumns, xAxisData);
+                } else {
+                    return generateBarChart(resultData, columns, xColumn, yColumns, xAxisData);
+                }
+            }
+            
+            // 生成柱状图配置
+            function generateBarChart(resultData, columns, xColumn, yColumns, xAxisData) {
+                // 提取Y轴数据系列
+                const series = yColumns.map((col, idx) => {
+                    const data = resultData.map(row => {
+                        const val = row[col];
+                        return val !== null && val !== undefined ? Number(val) : 0;
+                    });
+                    
+                    // 多系列时使用不同颜色
+                    const colors = [
+                        ['#15a8a8', '#0e8a8a'],
+                        ['#00d4ff', '#0099cc'],
+                        ['#fe5d26', '#cc4a1e'],
+                        ['#7c3aed', '#5b21b6'],
+                        ['#bf1363', '#8b0a46']
+                    ];
+                    const colorPair = colors[idx % colors.length];
+                    
+                    return {
+                        name: col,
+                        type: 'bar',
+                        data: data,
+                        itemStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: colorPair[0] },
+                                { offset: 1, color: colorPair[1] }
+                            ]),
+                            borderRadius: [8, 8, 0, 0]
+                        },
+                        emphasis: {
+                            itemStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: '#00d4ff' },
+                                    { offset: 1, color: '#15a8a8' }
+                                ])
+                            }
+                        },
+                        animationDuration: 1000,
+                        animationEasing: 'elasticOut',
+                        label: {
+                            show: resultData.length < 20,
+                            position: 'top',
+                            color: '#64748b',
+                            fontSize: 11
+                        }
+                    };
+                });
+                
+                // 科技感配色方案
+                const techColors = ['#15a8a8', '#00d4ff', '#fe5d26', '#7c3aed', '#bf1363', '#fbbf24'];
+                
+                // 图例配置(多系列时显示)
+                const legendConfig = yColumns.length > 1 ? {
+                    show: true,
+                    top: 10,
+                    right: 20,
+                    textStyle: {
+                        color: '#64748b',
+                        fontSize: 12
+                    },
+                    itemGap: 20
+                } : { show: false };
+                
+                return {
+                    backgroundColor: 'transparent',
+                    color: techColors,
+                    textStyle: {
+                        fontFamily: 'Space Grotesk, sans-serif',
+                        color: '#64748b'
+                    },
+                    title: {
+                        text: '',
+                        left: 'center',
+                        top: 10,
+                        textStyle: {
+                            color: '#0f172a',
+                            fontSize: 16,
+                            fontWeight: 600
+                        }
+                    },
+                    legend: legendConfig,
+                    tooltip: {
+                        trigger: 'axis',
+                        backgroundColor: 'rgba(30, 41, 59, 0.95)',
+                        borderColor: 'transparent',
+                        textStyle: {
+                            color: '#ffffff',
+                            fontFamily: 'Space Grotesk, sans-serif'
+                        },
+                        axisPointer: {
+                            type: 'shadow',
+                            shadowStyle: {
+                                color: 'rgba(21, 168, 168, 0.1)'
+                            }
+                        }
+                    },
+                    grid: {
+                        left: '80px',
+                        right: '40px',
+                        top: yColumns.length > 1 ? '80px' : '60px',
+                        bottom: '100px',
+                        containLabel: true
+                    },
+                    xAxis: {
+                        type: 'category',
+                        data: xAxisData,
+                        axisLine: {
+                            lineStyle: {
+                                color: '#e2e8f0'
+                            }
+                        },
+                        axisLabel: {
+                            color: '#64748b',
+                            fontSize: 11,
+                            fontFamily: 'Space Mono, monospace',
+                            rotate: resultData.length > 10 ? 45 : 0,
+                            interval: 0
+                        },
+                        splitLine: {
+                            show: false
+                        }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLine: {
+                            show: false
+                        },
+                        axisLabel: {
+                            color: '#64748b',
+                            fontSize: 11,
+                            fontFamily: 'Space Mono, monospace'
+                        },
+                        splitLine: {
+                            lineStyle: {
+                                color: 'rgba(0,0,0,0.05)',
+                                type: 'dashed'
+                            }
+                        }
+                    },
+                    series: series,
+                    toolbox: {
+                        show: resultData.length > 10,
+                        feature: {
+                            dataZoom: {
+                                show: true,
+                                title: {
+                                    zoom: '区域缩放',
+                                    back: '还原'
+                                }
+                            },
+                            restore: {
+                                show: true,
+                                title: '还原'
+                            }
+                        },
+                        iconStyle: {
+                            borderColor: '#64748b'
+                        },
+                        emphasis: {
+                            iconStyle: {
+                                borderColor: '#15a8a8'
+                            }
+                        },
+                        right: 20,
+                        top: 10
+                    }
+                };
+            }
+            
+            // 生成折线图配置
+            function generateLineChart(resultData, columns, xColumn, yColumns, xAxisData) {
+                const techColors = ['#15a8a8', '#00d4ff', '#fe5d26', '#7c3aed', '#bf1363'];
+                
+                const series = yColumns.map((col, idx) => {
+                    const data = resultData.map(row => {
+                        const val = row[col];
+                        return val !== null && val !== undefined ? Number(val) : 0;
+                    });
+                    
+                    const color = techColors[idx % techColors.length];
+                    
+                    return {
+                        name: col,
+                        type: 'line',
+                        data: data,
+                        smooth: true,
+                        lineStyle: {
+                            color: color,
+                            width: 3
+                        },
+                        itemStyle: {
+                            color: color,
+                            borderWidth: 2,
+                            borderColor: '#fff'
+                        },
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: color + '40' },
+                                { offset: 1, color: color + '08' }
+                            ])
+                        },
+                        emphasis: {
+                            focus: 'series',
+                            itemStyle: {
+                                borderWidth: 3,
+                                shadowBlur: 10,
+                                shadowColor: color
+                            }
+                        },
+                        animationDuration: 1500,
+                        animationEasing: 'cubicOut',
+                        symbol: 'circle',
+                        symbolSize: 8,
+                        showSymbol: resultData.length <= 30
+                    };
+                });
+                
+                return {
+                    backgroundColor: 'transparent',
+                    color: techColors,
+                    textStyle: {
+                        fontFamily: 'Space Grotesk, sans-serif',
+                        color: '#64748b'
+                    },
+                    title: {
+                        text: '',
+                        left: 'center',
+                        top: 10,
+                        textStyle: {
+                            color: '#0f172a',
+                            fontSize: 16,
+                            fontWeight: 600
+                        }
+                    },
+                    legend: {
+                        show: yColumns.length > 1,
+                        top: 10,
+                        right: 20,
+                        textStyle: {
+                            color: '#64748b',
+                            fontSize: 12
+                        }
+                    },
+                    tooltip: {
+                        trigger: 'axis',
+                        backgroundColor: 'rgba(30, 41, 59, 0.95)',
+                        borderColor: 'transparent',
+                        textStyle: {
+                            color: '#ffffff',
+                            fontFamily: 'Space Grotesk, sans-serif'
+                        },
+                        axisPointer: {
+                            type: 'line',
+                            lineStyle: {
+                                color: 'rgba(21, 168, 168, 0.3)',
+                                width: 2,
+                                type: 'dashed'
+                            }
+                        }
+                    },
+                    grid: {
+                        left: '80px',
+                        right: '40px',
+                        top: yColumns.length > 1 ? '80px' : '60px',
+                        bottom: '100px',
+                        containLabel: true
+                    },
+                    xAxis: {
+                        type: 'category',
+                        data: xAxisData,
+                        boundaryGap: false,
+                        axisLine: {
+                            lineStyle: {
+                                color: '#e2e8f0'
+                            }
+                        },
+                        axisLabel: {
+                            color: '#64748b',
+                            fontSize: 11,
+                            fontFamily: 'Space Mono, monospace',
+                            rotate: resultData.length > 15 ? 45 : 0,
+                            interval: 'auto'
+                        },
+                        splitLine: {
+                            show: false
+                        }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLine: {
+                            show: false
+                        },
+                        axisLabel: {
+                            color: '#64748b',
+                            fontSize: 11,
+                            fontFamily: 'Space Mono, monospace'
+                        },
+                        splitLine: {
+                            lineStyle: {
+                                color: 'rgba(0,0,0,0.05)',
+                                type: 'dashed'
+                            }
+                        }
+                    },
+                    series: series,
+                    toolbox: {
+                        show: resultData.length > 10,
+                        feature: {
+                            dataZoom: {
+                                show: true,
+                                title: {
+                                    zoom: '区域缩放',
+                                    back: '还原'
+                                }
+                            },
+                            restore: {
+                                show: true,
+                                title: '还原'
+                            }
+                        },
+                        iconStyle: {
+                            borderColor: '#64748b'
+                        },
+                        emphasis: {
+                            iconStyle: {
+                                borderColor: '#15a8a8'
+                            }
+                        },
+                        right: 20,
+                        top: 10
+                    }
+                };
+            }
+            
+            // 生成饼图配置
+            function generatePieChart(resultData, columns, xColumn, yColumns) {
+                const techColors = ['#15a8a8', '#00d4ff', '#fe5d26', '#7c3aed', '#bf1363', '#fbbf24', '#10b981', '#f59e0b'];
+                
+                // 饼图数据格式
+                const pieData = resultData.map((row, idx) => ({
+                    name: String(row[xColumn]),
+                    value: Number(row[yColumns[0]]) || 0,
+                    itemStyle: {
+                        color: techColors[idx % techColors.length],
+                        borderRadius: 10,
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    }
+                }));
+                
+                return {
+                    backgroundColor: 'transparent',
+                    color: techColors,
+                    textStyle: {
+                        fontFamily: 'Space Grotesk, sans-serif',
+                        color: '#64748b'
+                    },
+                    title: {
+                        text: '',
+                        left: 'center',
+                        top: 10,
+                        textStyle: {
+                            color: '#0f172a',
+                            fontSize: 16,
+                            fontWeight: 600
+                        }
+                    },
+                    tooltip: {
+                        trigger: 'item',
+                        backgroundColor: 'rgba(30, 41, 59, 0.95)',
+                        borderColor: 'transparent',
+                        textStyle: {
+                            color: '#ffffff',
+                            fontFamily: 'Space Grotesk, sans-serif'
+                        },
+                        formatter: '{b}: {c} ({d}%)'
+                    },
+                    legend: {
+                        show: true,
+                        orient: 'vertical',
+                        right: 20,
+                        top: 'center',
+                        textStyle: {
+                            color: '#64748b',
+                            fontSize: 12
+                        },
+                        formatter: function(name) {
+                            if (name.length > 15) {
+                                return name.substring(0, 15) + '...';
+                            }
+                            return name;
+                        }
+                    },
+                    series: [{
+                        name: yColumns[0],
+                        type: 'pie',
+                        radius: ['45%', '75%'],
+                        center: ['40%', '50%'],
+                        data: pieData,
+                        label: {
+                            show: true,
+                            color: '#64748b',
+                            fontFamily: 'Space Grotesk, sans-serif',
+                            fontSize: 12,
+                            formatter: '{d}%'
+                        },
+                        labelLine: {
+                            show: true,
+                            length: 15,
+                            length2: 10,
+                            lineStyle: {
+                                color: '#e2e8f0'
+                            }
+                        },
+                        emphasis: {
+                            itemStyle: {
+                                shadowBlur: 15,
+                                shadowOffsetX: 0,
+                                shadowColor: 'rgba(21, 168, 168, 0.5)'
+                            },
+                            label: {
+                                show: true,
+                                fontSize: 14,
+                                fontWeight: 'bold'
+                            }
+                        },
+                        animationDuration: 2000,
+                        animationEasing: 'elasticOut'
+                    }]
+                };
+            }
+
+
+            // Plotly 回退渲染函数
+            function renderPlotly(container, chartJsonStr) {
+                const chartData = JSON.parse(chartJsonStr);
+                const layout = chartData.layout || {};
+                
+                layout.paper_bgcolor = 'rgba(0,0,0,0)';
+                layout.plot_bgcolor = 'rgba(0,0,0,0)';
+                layout.font = { family: 'Space Grotesk, sans-serif', color: '#64748b', size: 12 };
+                layout.colorway = ['#15a8a8', '#023d60', '#fe5d26', '#bf1363', '#7c3aed'];
+                layout.autosize = true;
+                layout.margin = { l: 80, r: 40, t: 60, b: 120, pad: 10 };
+
+                if (!layout.xaxis) layout.xaxis = {};
+                layout.xaxis.automargin = true;
+                layout.xaxis.showgrid = true;
+                layout.xaxis.gridcolor = 'rgba(0,0,0,0.05)';
+                layout.xaxis.linecolor = '#e2e8f0';
+                layout.xaxis.tickfont = { family: 'Space Mono, monospace', size: 10 };
+                layout.xaxis.tickangle = -45;
+
+                if (!layout.yaxis) layout.yaxis = {};
+                layout.yaxis.automargin = true;
+                layout.yaxis.showgrid = true;
+                layout.yaxis.gridcolor = 'rgba(0,0,0,0.05)';
+                layout.yaxis.zeroline = false;
+                layout.yaxis.tickfont = { family: 'Space Mono, monospace', size: 10 };
+
+                Plotly.newPlot(container, chartData.data, layout, {
+                    displayModeBar: 'hover',
+                    responsive: true,
+                    displaylogo: false,
+                    modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d']
+                });
+            }
+
+            // 导出图表
+            function downloadChart(msgId, format) {
+                const chart = CHART_INSTANCES[msgId];
+                if (chart) {
+                    const url = chart.getDataURL({
+                        type: format || 'png',
+                        pixelRatio: 2,
+                        backgroundColor: '#fff'
+                    });
+                    const link = document.createElement('a');
+                    link.download = `chart-${msgId}.${format}`;
+                    link.href = url;
+                    link.click();
+                } else {
+                    alert('图表实例未找到');
+                }
+            }
+
+            // 全屏切换
+            function toggleFullscreen(elementId) {
+                const element = document.getElementById(elementId);
+                if (!document.fullscreenElement) {
+                    element.requestFullscreen().catch(err => {
+                        console.error('全屏失败:', err);
+                    });
+                } else {
+                    document.exitFullscreen();
+                }
+            }
 
             async function ask() {
                 const input = document.getElementById('questionInput');
@@ -659,7 +1496,7 @@ def ui():
 
                         // Initial SQL State
                         loadingDiv.innerHTML = `
-                            <div class="avatar ai"><i class="bi bi-robot"></i></div>
+                            <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
                             <div class="message-bubble" style="width: 100%">
                                 <div class="explanation-text">${explanation}</div>
                                 <div class="data-card" style="display: ${displayStyle}">
@@ -708,7 +1545,7 @@ def ui():
 
                         // Final Content
                         loadingDiv.innerHTML = `
-                            <div class="avatar ai"><i class="bi bi-robot"></i></div>
+                            <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
                             <div class="message-bubble" style="width: 100%">
                                 <div class="explanation-text">${explanation}</div>
 
@@ -723,7 +1560,15 @@ def ui():
                                 <!-- Chart Card -->
                                 <div id="chart-card-${msgId}" class="data-card mb-3" style="display:none;">
                                     <div class="data-card-header">
-                                        <span class="data-card-title">Visualization</span>
+                                        <span class="data-card-title"><i class="bi bi-bar-chart-fill me-2"></i>Visualization</span>
+                                        <div class="btn-group btn-group-sm" role="group">
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="downloadChart('${msgId}', 'png')" title="导出PNG">
+                                                <i class="bi bi-download"></i>
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleFullscreen('chart-container-${msgId}')" title="全屏">
+                                                <i class="bi bi-arrows-fullscreen"></i>
+                                            </button>
+                                        </div>
                                     </div>
                                     <div id="chart-container-${msgId}" style="width:100%; min-height:500px; padding:20px;"></div>
                                 </div>
@@ -748,64 +1593,21 @@ def ui():
                             </div>
                         `;
 
-                        if (runData.chart) {
+                        // 性能优化：后端不再返回 chart 数据，由前端直接根据 data 生成图表
+                        // if (runData.chart) {
+                        if (result && result.length > 0 && columns && columns.length > 0) {
                             try {
                                 const chartCard = document.getElementById(`chart-card-${msgId}`);
                                 const chartContainer = document.getElementById(`chart-container-${msgId}`);
                                 chartCard.style.display = 'block';
 
-                                const chartData = JSON.parse(runData.chart);
-
-                                // Apply Vanna Theme to Plotly (Tech/Modern Look)
-                                const layout = chartData.layout || {};
-                                layout.paper_bgcolor = 'rgba(0,0,0,0)';
-                                layout.plot_bgcolor = 'rgba(0,0,0,0)';
-                                layout.font = { family: 'Space Grotesk, sans-serif', color: '#64748b', size: 12 };
-                                layout.colorway = ['#15a8a8', '#023d60', '#fe5d26', '#bf1363', '#7c3aed'];
-                                layout.autosize = true;
-                                // 增大边距以防止标签被截断,使用automargin自动调整
-                                layout.margin = { l: 80, r: 40, t: 60, b: 120, pad: 10 };
-
-                                // Axis styling for "Tech" feel (Clean & Crisp)
-                                if (!layout.xaxis) layout.xaxis = {};
-                                layout.xaxis.automargin = true;
-                                layout.xaxis.showgrid = true;
-                                layout.xaxis.gridcolor = 'rgba(0,0,0,0.05)';
-                                layout.xaxis.linecolor = '#e2e8f0';
-                                layout.xaxis.tickfont = { family: 'Space Mono, monospace', size: 10 };
-                                layout.xaxis.tickangle = -45; // 倾斜标签避免重叠
-                                layout.xaxis.tickmode = 'auto'; // 自动选择刻度
-                                layout.xaxis.nticks = 15; // 限制刻度数量
-
-                                if (!layout.yaxis) layout.yaxis = {};
-                                layout.yaxis.automargin = true;
-                                layout.yaxis.showgrid = true;
-                                layout.yaxis.gridcolor = 'rgba(0,0,0,0.05)';
-                                layout.yaxis.zeroline = false;
-                                layout.yaxis.tickfont = { family: 'Space Mono, monospace', size: 10 };
-
-                                // Hover label styling (Dark tooltip for contrast)
-                                layout.hoverlabel = {
-                                    bgcolor: '#1e293b',
-                                    bordercolor: 'transparent',
-                                    font: { family: 'Space Grotesk, sans-serif', color: '#ffffff' }
-                                };
-
-                                // 动态计算容器高度
-                                const dataLength = chartData.data && chartData.data[0] ? 
-                                    (chartData.data[0].x ? chartData.data[0].x.length : chartData.data[0].y ? chartData.data[0].y.length : 10) : 10;
-                                const minHeight = Math.max(500, dataLength * 25 + 150); // 根据数据点数量动态调整
-                                chartContainer.style.height = minHeight + 'px';
-
-                                Plotly.newPlot(chartContainer, chartData.data, layout, {
-                                    displayModeBar: 'hover',
-                                    responsive: true,
-                                    displaylogo: false,
-                                    modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d']
-                                }).then(() => {
-                                    // 绘制完成后调整大小以确保完全显示
-                                    window.dispatchEvent(new Event('resize'));
-                                });
+                                // 尝试使用ECharts渲染
+                                try {
+                                    renderECharts(chartContainer, null, result, columns, msgId);
+                                } catch (echartsError) {
+                                    console.warn("ECharts render failed:", echartsError);
+                                    chartCard.style.display = 'none'; // 渲染失败则隐藏
+                                }
                             } catch (e) {
                                 console.error("Chart render error", e);
                             }
@@ -814,7 +1616,7 @@ def ui():
                     } else {
                         // Conversational Response
                         loadingDiv.innerHTML = `
-                            <div class="avatar ai"><i class="bi bi-robot"></i></div>
+                            <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
                             <div class="message-bubble">
                                 ${sqlData.text}
                             </div>
@@ -825,7 +1627,7 @@ def ui():
                     const loadingDiv = document.getElementById(loadingId);
                     if(loadingDiv) {
                         loadingDiv.innerHTML = `
-                            <div class="avatar ai"><i class="bi bi-exclamation-triangle-fill text-danger"></i></div>
+                            <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-exclamation-triangle-fill text-danger&quot;></i>'"></div>
                             <div class="message-bubble text-danger border-danger bg-light">
                                 <strong>Error:</strong> ${e.message}
                             </div>
@@ -847,7 +1649,7 @@ def ui():
                     `;
                 } else {
                     div.innerHTML = `
-                        <div class="avatar ai"><i class="bi bi-robot"></i></div>
+                        <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
                         <div class="message-bubble">${text}</div>
                     `;
                 }
@@ -862,7 +1664,7 @@ def ui():
                 div.className = 'message-wrapper ai';
                 div.id = id;
                 div.innerHTML = `
-                    <div class="avatar ai"><i class="bi bi-robot"></i></div>
+                    <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
                     <div class="message-bubble">
                         <div class="typing-indicator"><span></span><span></span><span></span></div>
                     </div>

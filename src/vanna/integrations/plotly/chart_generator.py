@@ -48,6 +48,27 @@ class PlotlyChartGenerator:
         if df.empty:
             raise ValueError("Cannot visualize empty DataFrame")
 
+        # Try to convert columns to datetime if they look like dates
+        # This helps in identifying time series correctly
+        for col in df.columns:
+            # Check if column name suggests it's a date
+            if any(x in col.lower() for x in ['date', 'time', 'day', 'month', 'year', 'dt', '_dt', 'stat']):
+                try:
+                    temp_col = None
+                    # Handle different date formats
+                    if df[col].dtype in ['int64', 'int32', 'float64']:
+                        # Try YYYYMMDD format (e.g., 20251110 -> 2025-11-10)
+                        temp_col = pd.to_datetime(df[col].astype(str), format='%Y%m%d', errors='coerce')
+                    elif df[col].dtype == 'object':
+                        # Try automatic parsing for string dates
+                        temp_col = pd.to_datetime(df[col], errors='coerce')
+
+                    # Only apply if conversion was successful (not all NaT)
+                    if temp_col is not None and not temp_col.isna().all():
+                        df[col] = temp_col
+                except (ValueError, TypeError, AttributeError):
+                    pass
+
         # Heuristic: If 4 or more columns, render as a table
         if len(df.columns) >= 4:
             fig = self._create_table(df, title)
@@ -67,9 +88,17 @@ class PlotlyChartGenerator:
         # Apply heuristics
         if is_timeseries and len(numeric_cols) > 0:
             # Time series line chart
-            fig = self._create_time_series_chart(
-                df, datetime_cols[0], numeric_cols, title
-            )
+            if len(categorical_cols) > 0 and len(numeric_cols) == 1:
+                # Case: Long format time series (Date, Category, Value)
+                # e.g. stat_date, measure_type, daily_count
+                fig = self._create_grouped_time_series_chart(
+                    df, datetime_cols[0], categorical_cols[0], numeric_cols[0], title
+                )
+            else:
+                # Case: Wide format time series (Date, Value1, Value2...)
+                fig = self._create_time_series_chart(
+                    df, datetime_cols[0], numeric_cols, title
+                )
         elif len(numeric_cols) == 1 and len(categorical_cols) == 0:
             # Single numeric column: histogram
             fig = self._create_histogram(df, numeric_cols[0], title)
@@ -77,6 +106,26 @@ class PlotlyChartGenerator:
             # One categorical, one numeric: bar chart
             fig = self._create_bar_chart(
                 df, categorical_cols[0], numeric_cols[0], title
+            )
+        elif len(numeric_cols) == 2 and len(categorical_cols) >= 1:
+            # Two numeric columns + categorical: grouped line chart
+            # Heuristic: Identify X axis (date/id) vs Y axis (value)
+            col1, col2 = numeric_cols[0], numeric_cols[1]
+
+            # Check if col1 looks like a date/id
+            col1_is_x = any(x in col1.lower() for x in ['date', 'time', 'year', 'id', 'day', 'month'])
+            col2_is_x = any(x in col2.lower() for x in ['date', 'time', 'year', 'id', 'day', 'month'])
+
+            if col1_is_x and not col2_is_x:
+                x_col, y_col = col1, col2
+            elif col2_is_x and not col1_is_x:
+                x_col, y_col = col2, col1
+            else:
+                # Default to first as X
+                x_col, y_col = col1, col2
+
+            fig = self._create_grouped_time_series_chart(
+                df, x_col, categorical_cols[0], y_col, title
             )
         elif len(numeric_cols) == 2:
             # Two numeric columns: scatter plot
@@ -119,6 +168,16 @@ class PlotlyChartGenerator:
             font={"color": self.THEME_COLORS["navy"]},  # Navy for text
             autosize=True,  # Allow chart to resize responsively
             colorway=self.COLOR_PALETTE,  # Use Vanna brand colors for data
+            # Move legend to bottom to avoid overlap with modebar
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=-0.25,  # Place below the chart
+                xanchor="center",
+                x=0.5
+            ),
+            # Add some margin to the top for modebar
+            margin=dict(t=60, b=60),
             # Don't set width/height - let frontend handle sizing
         )
         return fig
@@ -190,6 +249,26 @@ class PlotlyChartGenerator:
                 zmin=-1,
                 zmax=1,
             ),
+        )
+        self._apply_standard_layout(fig)
+        return fig
+
+    def _create_grouped_time_series_chart(
+        self, df: pd.DataFrame, time_col: str, cat_col: str, val_col: str, title: str
+    ) -> go.Figure:
+        """Create a multi-line time series chart grouped by a categorical column."""
+        fig = px.line(
+            df,
+            x=time_col,
+            y=val_col,
+            color=cat_col,
+            title=title,
+            color_discrete_sequence=self.COLOR_PALETTE,
+        )
+        fig.update_layout(
+            xaxis_title=time_col,
+            yaxis_title=val_col,
+            hovermode="x unified",
         )
         self._apply_standard_layout(fig)
         return fig
