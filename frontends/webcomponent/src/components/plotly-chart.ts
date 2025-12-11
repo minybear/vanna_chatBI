@@ -43,7 +43,7 @@ export class PlotlyChart extends LitElement {
 
       .plotly-div {
         width: 100%;
-        min-height: 400px;
+        min-height: 300px;
       }
 
       /* Plotly layering fix for Shadow DOM */
@@ -143,7 +143,7 @@ export class PlotlyChart extends LitElement {
       // Set explicit dimensions for Shadow DOM compatibility
       autosize: false,
       width: this.layout.width || undefined,
-      height: this.layout.height || 400,
+      height: this.layout.height || 320,
     };
 
     // If backend didn't set background colors, use transparent

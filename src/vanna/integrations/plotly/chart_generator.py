@@ -177,7 +177,7 @@ class PlotlyChartGenerator:
                 x=0.5
             ),
             # Add some margin to the top for modebar
-            margin=dict(t=60, b=60),
+            margin=dict(t=40, b=40),
             # Don't set width/height - let frontend handle sizing
         )
         return fig

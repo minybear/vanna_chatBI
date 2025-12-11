@@ -36,27 +36,59 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
         # Initialize OpenAI_Chat with the client
         OpenAI_Chat.__init__(self, client=client, config=vanna_config)
 
+    def detect_language(self, text: str) -> str:
+        """
+        检测文本的主要语言(中文或英文)
+        返回: 'zh' (中文) 或 'en' (英文)
+        """
+        # 统计中文字符数量
+        chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
+        # 统计英文字母数量
+        english_chars = len(re.findall(r'[a-zA-Z]', text))
+        
+        # 如果中文字符占比超过30%,判定为中文
+        total_chars = len(text.strip())
+        if total_chars == 0:
+            return 'en'
+        
+        chinese_ratio = chinese_chars / total_chars
+        if chinese_ratio > 0.3 or chinese_chars > english_chars:
+            return 'zh'
+        else:
+            return 'en'
+
     def generate_sql_optimized(self, question: str, allow_llm_to_see_data=False, **kwargs):
         """
         Optimized version of generate_sql that returns both SQL and Explanation in a single pass.
         """
+        # 0. 检测用户问题的语言
+        user_lang = self.detect_language(question)
+        print(f"[DEBUG] 检测到用户语言: {'中文' if user_lang == 'zh' else '英文'}")
+        
         # 1. Retrieve Context
         question_sql_list = self.get_similar_question_sql(question, **kwargs)
         ddl_list = self.get_related_ddl(question, **kwargs)
         doc_list = self.get_related_documentation(question, **kwargs)
 
-        # 2. Construct Prompt
+        # 2. Construct Prompt (根据语言动态生成)
         if self.config is not None:
             initial_prompt = self.config.get("initial_prompt", None)
         else:
             initial_prompt = None
 
         if initial_prompt is None:
-            initial_prompt = (
-                f"You are a {self.dialect} expert. "
-                + "Please help to generate a SQL query to answer the question. "
-                + "Your response should ONLY be based on the given context and follow the response guidelines and format instructions. "
-            )
+            if user_lang == 'zh':
+                initial_prompt = (
+                    f"你是一个 {self.dialect} 数据库专家。"
+                    + "请帮助生成 SQL 查询来回答用户的问题。"
+                    + "你的回复应该仅基于给定的上下文，并遵循响应指南和格式说明。"
+                )
+            else:
+                initial_prompt = (
+                    f"You are a {self.dialect} expert. "
+                    + "Please help to generate a SQL query to answer the question. "
+                    + "Your response should ONLY be based on the given context and follow the response guidelines and format instructions. "
+                )
 
         initial_prompt = self.add_ddl_to_prompt(initial_prompt, ddl_list, max_tokens=self.max_tokens)
 
@@ -65,19 +97,37 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
 
         initial_prompt = self.add_documentation_to_prompt(initial_prompt, doc_list, max_tokens=self.max_tokens)
 
-        # Custom Guidelines for Single-Pass Explanation
-        initial_prompt += (
-            "===Response Guidelines \n"
-            "1. If the provided context is sufficient, please generate a valid SQL query. \n"
-            "2. **IMPORTANT**: You must provide a brief explanation (1-2 sentences) of what the query does. \n"
-            "3. Format your response as follows:\n"
-            "   Explanation: [Your explanation here]\n"
-            "   ```sql\n   [Your SQL here]\n   ```\n"
-            "4. If the provided context is almost sufficient but requires knowledge of a specific string in a particular column, please generate an intermediate SQL query to find the distinct strings in that column. Prepend the query with a comment saying intermediate_sql \n"
-            "5. If the provided context is insufficient, please explain why it can't be generated. \n"
-            f"6. Ensure that the output SQL is {self.dialect}-compliant and executable. \n"
-            "7. **CRITICAL for MySQL**: DO NOT use `UNIX_TIMESTAMP` with a format string (e.g., `UNIX_TIMESTAMP(col, '%Y-%m-%d')` is INVALID). `UNIX_TIMESTAMP()` only accepts 0 or 1 argument. To format a timestamp, use `DATE_FORMAT(FROM_UNIXTIME(timestamp_col/1000), '%Y-%m-%d')` (if ms) or `DATE_FORMAT(FROM_UNIXTIME(timestamp_col), '%Y-%m-%d')` (if seconds). \n"
-        )
+        # Custom Guidelines for Single-Pass Explanation (根据语言切换)
+        if user_lang == 'zh':
+            initial_prompt += (
+                "===响应指南 \n"
+                "1. 如果提供的上下文足够，请生成有效的 SQL 查询。\n"
+                "2. **重要**: 你必须用中文提供简短的解释（1-2句话），说明查询的作用。\n"
+                "3. 按照以下格式响应:\n"
+                "   解释: [你的中文解释]\n"
+                "   ```sql\n   [你的SQL查询]\n   ```\n"
+                "4. 如果提供的上下文几乎足够，但需要了解特定列中的特定字符串，请生成一个中间SQL查询来查找该列中的不同字符串。在查询前添加注释 intermediate_sql。\n"
+                "5. 如果提供的上下文不足，请用中文解释为什么无法生成。\n"
+                f"6. 确保输出的 SQL 符合 {self.dialect} 标准且可执行。\n"
+                "7. **MySQL关键提示**: 不要使用带格式字符串的 `UNIX_TIMESTAMP`（例如 `UNIX_TIMESTAMP(col, '%Y-%m-%d')` 是无效的）。`UNIX_TIMESTAMP()` 只接受 0 或 1 个参数。要格式化时间戳，请使用 `DATE_FORMAT(FROM_UNIXTIME(timestamp_col/1000), '%Y-%m-%d')`（如果是毫秒）或 `DATE_FORMAT(FROM_UNIXTIME(timestamp_col), '%Y-%m-%d')`（如果是秒）。\n"
+                "8. **语言要求**: 所有解释和说明文字必须使用中文。\n"
+                "9. **多数据库架构要求**: 本系统使用多数据库架构，SQL中的所有表名必须使用完全限定格式 `数据库名.表名`（例如: `SELECT * FROM database_name.table_name`）。绝不能省略数据库名，否则会导致执行错误。\n"
+            )
+        else:
+            initial_prompt += (
+                "===Response Guidelines \n"
+                "1. If the provided context is sufficient, please generate a valid SQL query. \n"
+                "2. **IMPORTANT**: You must provide a brief explanation (1-2 sentences) in English of what the query does. \n"
+                "3. Format your response as follows:\n"
+                "   Explanation: [Your explanation here in English]\n"
+                "   ```sql\n   [Your SQL here]\n   ```\n"
+                "4. If the provided context is almost sufficient but requires knowledge of a specific string in a particular column, please generate an intermediate SQL query to find the distinct strings in that column. Prepend the query with a comment saying intermediate_sql \n"
+                "5. If the provided context is insufficient, please explain in English why it can't be generated. \n"
+                f"6. Ensure that the output SQL is {self.dialect}-compliant and executable. \n"
+                "7. **CRITICAL for MySQL**: DO NOT use `UNIX_TIMESTAMP` with a format string (e.g., `UNIX_TIMESTAMP(col, '%Y-%m-%d')` is INVALID). `UNIX_TIMESTAMP()` only accepts 0 or 1 argument. To format a timestamp, use `DATE_FORMAT(FROM_UNIXTIME(timestamp_col/1000), '%Y-%m-%d')` (if ms) or `DATE_FORMAT(FROM_UNIXTIME(timestamp_col), '%Y-%m-%d')` (if seconds). \n"
+                "8. **Language requirement**: All explanations must be in English. \n"
+                "9. **Multi-Database Architecture Requirement**: This system uses a multi-database architecture. ALL table names in SQL queries MUST use the fully qualified format `database_name.table_name` (e.g., `SELECT * FROM database_name.table_name`). Never omit the database name or the query will fail. \n"
+            )
 
         message_log = [self.system_message(initial_prompt)]
 
@@ -99,15 +149,24 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
             intermediate_sql = self.extract_sql(llm_response)
             try:
                 df = self.run_sql(intermediate_sql)
-                # Re-prompt with data
+                # Re-prompt with data (根据语言切换提示文本)
                 message_log.append(self.assistant_message(llm_response))
-                message_log.append(self.user_message(
-                    f"The following is a pandas DataFrame with the results of the intermediate SQL query {intermediate_sql}: \n"
-                    + df.to_markdown()
-                ))
+                if user_lang == 'zh':
+                    message_log.append(self.user_message(
+                        f"以下是中间SQL查询 {intermediate_sql} 的结果（pandas DataFrame格式）: \n"
+                        + df.to_markdown()
+                    ))
+                else:
+                    message_log.append(self.user_message(
+                        f"The following is a pandas DataFrame with the results of the intermediate SQL query {intermediate_sql}: \n"
+                        + df.to_markdown()
+                    ))
                 llm_response = self.submit_prompt(message_log, **kwargs)
             except Exception as e:
-                return f"Error running intermediate SQL: {e}"
+                if user_lang == 'zh':
+                    return f"执行中间SQL时出错: {e}"
+                else:
+                    return f"Error running intermediate SQL: {e}"
 
         return llm_response
 
@@ -239,37 +298,116 @@ def get_config():
 @app.post("/api/v0/generate_sql")
 def generate_sql(request: QuestionRequest):
     try:
+        # 0. 检测用户问题的语言
+        user_lang = vn.detect_language(request.question)
+        
         # 1. Generate SQL using Optimized Vanna Method (Single Pass for SQL + Explanation)
         raw_result = vn.generate_sql_optimized(question=request.question, allow_llm_to_see_data=True)
+        
+        # 【调试日志】记录LLM原始输出,方便排查问题
+        print(f"\n{'='*60}")
+        print(f"[DEBUG] 用户问题: {request.question}")
+        print(f"[DEBUG] 检测语言: {'中文' if user_lang == 'zh' else '英文'}")
+        print(f"[DEBUG] LLM原始回复:\n{raw_result}")
+        print(f"{'='*60}\n")
 
         # 2. Parse Result to extract SQL and Explanation
         # Expected format: "Explanation: ... ```sql ... ```"
         
+        # 尝试多种SQL提取模式(增强鲁棒性)
+        sql_match = None
+        explanation = ""
+        
+        # 模式1: 标准的 ```sql ... ```
         sql_match = re.search(r"```sql\s*(.*?)\s*```", raw_result, re.DOTALL | re.IGNORECASE)
+        
+        # 模式2: 通用的 ``` ... ```
         if not sql_match:
-             sql_match = re.search(r"```\s*(.*?)\s*```", raw_result, re.DOTALL | re.IGNORECASE)
+            sql_match = re.search(r"```\s*(.*?)\s*```", raw_result, re.DOTALL | re.IGNORECASE)
+        
+        # 模式3: 检测SELECT/INSERT/UPDATE/DELETE等SQL关键字(无代码块包裹的情况)
+        if not sql_match:
+            sql_keywords_pattern = r'(SELECT|INSERT|UPDATE|DELETE|WITH|CREATE|ALTER|DROP)\s+.*?(?:;|$)'
+            potential_sql = re.search(sql_keywords_pattern, raw_result, re.DOTALL | re.IGNORECASE)
+            if potential_sql:
+                print(f"[DEBUG] {'检测到无代码块包裹的SQL，尝试提取...' if user_lang == 'zh' else 'Detected SQL without code blocks, attempting extraction...'}")
+                
+                # 提取从SQL关键字开始到分号或字符串末尾的内容
+                sql_start = potential_sql.start()
+                
+                # 尝试找到SQL结束位置(分号或两个连续换行)
+                sql_end_match = re.search(r';|\n\n', raw_result[sql_start:])
+                if sql_end_match:
+                    sql_end = sql_start + sql_end_match.end()
+                else:
+                    sql_end = len(raw_result)
+                
+                extracted_sql = raw_result[sql_start:sql_end].strip()
+                
+                # 只清理开头的注释行（以 -- 或 /* 开头的行），保留SQL语句本身
+                lines = extracted_sql.split('\n')
+                sql_start_index = 0
+                for i, line in enumerate(lines):
+                    stripped = line.strip()
+                    # 跳过空行和注释行
+                    if stripped and not stripped.startswith('--') and not stripped.startswith('/*'):
+                        sql_start_index = i
+                        break
+                extracted_sql = '\n'.join(lines[sql_start_index:]).strip()
+                
+                # 创建一个模拟的match对象
+                class MockMatch:
+                    def __init__(self, text):
+                        self._text = text
+                    def group(self, n):
+                        return self._text
+                
+                sql_match = MockMatch(extracted_sql)
+                
+                # 提取SQL之前的内容作为解释
+                explanation = raw_result[:sql_start].strip()
 
         if sql_match:
             clean_sql = sql_match.group(1).strip()
             
             # Remove "intermediate_sql" marker if present
             clean_sql = re.sub(r'^intermediate_sql\s*', '', clean_sql, flags=re.IGNORECASE)
+            # 清理SQL中的注释行(-- 开头),但保留内联注释
+            clean_sql_lines = []
+            for line in clean_sql.split('\n'):
+                stripped = line.strip()
+                # 保留非注释行,或者是有代码的注释行(内联注释)
+                if not stripped.startswith('--') or ' -- ' in line:
+                    clean_sql_lines.append(line)
+            clean_sql = '\n'.join(clean_sql_lines).strip()
             
             # Extract explanation (everything before the SQL block usually)
-            # Or look for "Explanation:" prefix
-            explanation = ""
-            explanation_match = re.search(r"Explanation:\s*(.*?)(?=```)", raw_result, re.DOTALL | re.IGNORECASE)
-            if explanation_match:
-                explanation = explanation_match.group(1).strip()
-            else:
-                # Fallback: Use text before code block
-                parts = raw_result.split("```")
-                if len(parts) > 0:
-                    explanation = parts[0].replace("Explanation:", "").strip()
+            # Or look for "Explanation:" or "解释:" prefix
+            if not explanation:  # 如果之前没有提取到explanation
+                # 尝试匹配中文"解释:"
+                explanation_match = re.search(r"解释[:：]\s*(.*?)(?=```)", raw_result, re.DOTALL | re.IGNORECASE)
+                if not explanation_match:
+                    # 尝试匹配英文"Explanation:"
+                    explanation_match = re.search(r"Explanation:\s*(.*?)(?=```)", raw_result, re.DOTALL | re.IGNORECASE)
+                
+                if explanation_match:
+                    explanation = explanation_match.group(1).strip()
+                else:
+                    # Fallback: Use text before code block
+                    parts = raw_result.split("```")
+                    if len(parts) > 0:
+                        explanation = parts[0].replace("Explanation:", "").replace("解释:", "").replace("解释：", "").strip()
             
             if not explanation:
-                explanation = "Here is the SQL query for your request."
+                explanation = "根据您的问题，我生成了以下SQL查询。" if user_lang == 'zh' else "Here is the SQL query for your request."
+            
+            # 确保explanation中不包含SQL代码
+            if "SELECT" in explanation.upper() or "FROM" in explanation.upper():
+                explanation = "根据您的问题，我生成了以下SQL查询。" if user_lang == 'zh' else "Here is the SQL query for your request."
 
+            print(f"[DEBUG] {'成功提取SQL' if user_lang == 'zh' else 'Successfully extracted SQL'}: {clean_sql[:100]}...")
+            print(f"[DEBUG] {'解释' if user_lang == 'zh' else 'Explanation'}: {explanation[:100]}...")
+            
             return {
                 "sql": clean_sql,
                 "is_sql": True,
@@ -277,6 +415,7 @@ def generate_sql(request: QuestionRequest):
             }
         else:
             # No SQL found, treat as conversational response
+            print(f"[DEBUG] {'未检测到SQL，作为对话回复处理' if user_lang == 'zh' else 'No SQL detected, treating as conversational response'}")
             return {
                 "text": raw_result,
                 "is_sql": False,
@@ -287,6 +426,8 @@ def generate_sql(request: QuestionRequest):
         # 捕获所有异常并返回友好的错误信息
         error_msg = f"生成 SQL 失败: {str(e)}"
         print(error_msg)
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.post("/api/v0/run_sql")
@@ -726,9 +867,8 @@ def ui():
                 const echartsOption = smartGenerateChart(resultData, columns);
                 
                 // 动态计算容器高度
-                const dataLength = resultData.length;
-                const minHeight = Math.max(500, dataLength * 30 + 150);
-                container.style.height = minHeight + 'px';
+                // 优化：使用固定高度，避免数据量大时图表过高，依靠 dataZoom 进行缩放
+                container.style.height = '400px';
 
                 // 初始化 ECharts
                 const chart = echarts.init(container, null, {
@@ -1013,7 +1153,7 @@ def ui():
                 const legendConfig = yColumns.length > 1 ? {
                     show: true,
                     top: 10,
-                    right: 20,
+                    left: 'center',
                     textStyle: {
                         color: '#64748b',
                         fontSize: 12
@@ -1195,7 +1335,7 @@ def ui():
                     legend: {
                         show: yColumns.length > 1,
                         top: 10,
-                        right: 20,
+                        left: 'center',
                         textStyle: {
                             color: '#64748b',
                             fontSize: 12
@@ -1570,7 +1710,7 @@ def ui():
                                             </button>
                                         </div>
                                     </div>
-                                    <div id="chart-container-${msgId}" style="width:100%; min-height:500px; padding:20px;"></div>
+                                    <div id="chart-container-${msgId}" style="width:100%; min-height:400px; padding:20px;"></div>
                                 </div>
 
                                 <!-- Data Table Card -->
