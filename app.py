@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import requests
 from datetime import datetime
 from vanna.legacy.openai import OpenAI_Chat
@@ -71,6 +72,29 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
         doc_list = self.get_related_documentation(question, **kwargs)
 
         # 2. Construct Prompt (根据语言动态生成)
+        # #region agent log
+        t_start_prompt = time.time()
+        # #endregion
+        
+        # 获取当前时间信息
+        from datetime import datetime
+        current_time = datetime.now()
+        current_date_str = current_time.strftime('%Y-%m-%d')
+        current_datetime_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
+        current_weekday_en = current_time.strftime('%A')
+        
+        # 中文星期映射
+        weekday_map = {
+            'Monday': '星期一',
+            'Tuesday': '星期二',
+            'Wednesday': '星期三',
+            'Thursday': '星期四',
+            'Friday': '星期五',
+            'Saturday': '星期六',
+            'Sunday': '星期日'
+        }
+        current_weekday_zh = weekday_map.get(current_weekday_en, current_weekday_en)
+        
         if self.config is not None:
             initial_prompt = self.config.get("initial_prompt", None)
         else:
@@ -78,14 +102,32 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
 
         if initial_prompt is None:
             if user_lang == 'zh':
+                # 中文提示词 - 添加当前时间信息
+                time_context = (
+                    f"===当前时间信息===\n"
+                    f"当前日期: {current_date_str}\n"
+                    f"当前时间: {current_datetime_str}\n"
+                    f"星期: {current_weekday_zh}\n"
+                    f"注意: 在生成涉及时间的SQL查询时，请使用上述当前时间作为参考基准。\n\n"
+                )
                 initial_prompt = (
-                    f"你是一个 {self.dialect} 数据库专家。"
+                    time_context
+                    + f"你是一个 {self.dialect} 数据库专家。"
                     + "请帮助生成 SQL 查询来回答用户的问题。"
                     + "你的回复应该仅基于给定的上下文，并遵循响应指南和格式说明。"
                 )
             else:
+                # 英文提示词 - 添加当前时间信息
+                time_context = (
+                    f"===Current Time Information===\n"
+                    f"Current Date: {current_date_str}\n"
+                    f"Current Time: {current_datetime_str}\n"
+                    f"Day of Week: {current_weekday_en}\n"
+                    f"Note: When generating SQL queries involving time, use the above current time as the reference point.\n\n"
+                )
                 initial_prompt = (
-                    f"You are a {self.dialect} expert. "
+                    time_context
+                    + f"You are a {self.dialect} expert. "
                     + "Please help to generate a SQL query to answer the question. "
                     + "Your response should ONLY be based on the given context and follow the response guidelines and format instructions. "
                 )
@@ -782,6 +824,7 @@ def ui():
                                 <h5 class="mb-0 fw-bold">Training Data</h5>
                                 <div>
                                     <button class="btn btn-sm btn-success me-2 rounded-pill px-3" onclick="showAddModal()"><i class="bi bi-plus-lg me-1"></i>Add Data</button>
+                                    <button class="btn btn-sm btn-danger me-2 rounded-pill px-3" onclick="batchDelete()" id="batchDeleteBtn" style="display:none;"><i class="bi bi-trash me-1"></i>Batch Delete</button>
                                     <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="loadKnowledgeBase()"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
                                 </div>
                             </div>
@@ -789,6 +832,7 @@ def ui():
                                 <table class="table table-hover align-middle" id="kbTable">
                                     <thead class="table-light">
                                         <tr>
+                                            <th style="width: 40px"><input class="form-check-input" type="checkbox" id="selectAllKb" onclick="toggleSelectAll()"></th>
                                             <th style="width: 100px">Type</th>
                                             <th>Content / SQL</th>
                                             <th style="width: 25%">Related Question</th>
@@ -796,7 +840,7 @@ def ui():
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <tr><td colspan="4" class="text-center p-5 text-muted">Loading...</td></tr>
+                                        <tr><td colspan="5" class="text-center p-5 text-muted">Loading...</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -976,10 +1020,44 @@ def ui():
                 
                 return dateStr;
             }
+            
+            // 检测列的数据类型（数值列 vs 文本列）
+            function detectColumnTypes(resultData, columns) {
+                const columnTypes = {};
+                
+                columns.forEach(col => {
+                    // 检查该列的所有值
+                    let numericCount = 0;
+                    let totalCount = 0;
+                    
+                    resultData.forEach(row => {
+                        const val = row[col];
+                        if (val !== null && val !== undefined && val !== '') {
+                            totalCount++;
+                            // 检查是否为数字
+                            if (!isNaN(Number(val)) && val !== true && val !== false) {
+                                numericCount++;
+                            }
+                        }
+                    });
+                    
+                    // 如果超过80%的值是数字，则认为是数值列
+                    columnTypes[col] = (totalCount > 0 && numericCount / totalCount >= 0.8) ? 'numeric' : 'text';
+                });
+                
+                return columnTypes;
+            }
 
-            function detectChartType(resultData, columns) {
+            function detectChartType(resultData, columns, columnTypes = null) {
                 const xColumn = columns[0];
-                const yColumns = columns.slice(1);
+                
+                // 如果没有提供列类型，自动检测
+                if (!columnTypes) {
+                    columnTypes = detectColumnTypes(resultData, columns);
+                }
+                
+                // 只考虑数值列作为Y轴
+                const yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
                 
                 // 规则0: 检查是否为长格式时间序列
                 const longFormat = isLongFormatTimeSeries(resultData, columns);
@@ -1035,8 +1113,12 @@ def ui():
             
             // 智能生成图表配置
             function smartGenerateChart(resultData, columns) {
-                // 检测最佳图表类型
-                const chartType = detectChartType(resultData, columns);
+                // 先检测列类型
+                const columnTypes = detectColumnTypes(resultData, columns);
+                console.log('列类型检测结果:', columnTypes);
+                
+                // 检测最佳图表类型（传入列类型信息）
+                const chartType = detectChartType(resultData, columns, columnTypes);
                 console.log('智能选择图表类型:', chartType);
                 
                 // 处理长格式时间序列数据
@@ -1069,9 +1151,19 @@ def ui():
                     }
                 }
                 
-                // 假设第一列是X轴(标签/类别),其他列是数值
+                // 假设第一列是X轴(标签/类别)
                 const xColumn = columns[0];
-                const yColumns = columns.slice(1);
+                
+                // 只选择数值列作为Y轴系列（排除文本列）
+                let yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
+                
+                console.log('X轴列:', xColumn, '| Y轴数值列:', yColumns);
+                
+                // 如果没有数值列，使用所有列（回退逻辑）
+                if (yColumns.length === 0) {
+                    console.warn('未检测到数值列，使用所有列');
+                    yColumns = columns.slice(1);
+                }
                 
                 // 提取X轴数据
                 const xAxisData = resultData.map(row => {
@@ -1145,6 +1237,30 @@ def ui():
                         }
                     };
                 });
+                
+                // 计算Y轴数据范围
+                let allValues = [];
+                series.forEach(s => {
+                    allValues = allValues.concat(s.data);
+                });
+                const minVal = Math.min(...allValues);
+                const maxVal = Math.max(...allValues);
+                
+                // 计算合理的Y轴范围（添加10%的padding）
+                const range = maxVal - minVal;
+                const padding = range * 0.1;
+                let yMin = minVal - padding;
+                let yMax = maxVal + padding;
+                
+                // 如果所有值都是正数，从0开始显示
+                if (minVal >= 0) {
+                    yMin = 0;
+                }
+                
+                // 如果所有值都是负数，最大值设为0
+                if (maxVal <= 0) {
+                    yMax = 0;
+                }
                 
                 // 科技感配色方案
                 const techColors = ['#15a8a8', '#00d4ff', '#fe5d26', '#7c3aed', '#bf1363', '#fbbf24'];
@@ -1222,6 +1338,8 @@ def ui():
                     },
                     yAxis: {
                         type: 'value',
+                        min: yMin,
+                        max: yMax,
                         axisLine: {
                             show: false
                         },
@@ -1315,6 +1433,30 @@ def ui():
                     };
                 });
                 
+                // 计算Y轴数据范围
+                let allValues = [];
+                series.forEach(s => {
+                    allValues = allValues.concat(s.data);
+                });
+                const minVal = Math.min(...allValues);
+                const maxVal = Math.max(...allValues);
+                
+                // 计算合理的Y轴范围（添加10%的padding）
+                const range = maxVal - minVal;
+                const padding = range * 0.1;
+                let yMin = minVal - padding;
+                let yMax = maxVal + padding;
+                
+                // 如果所有值都是正数，从0开始显示
+                if (minVal >= 0) {
+                    yMin = 0;
+                }
+                
+                // 如果所有值都是负数，最大值设为0
+                if (maxVal <= 0) {
+                    yMax = 0;
+                }
+                
                 return {
                     backgroundColor: 'transparent',
                     color: techColors,
@@ -1387,6 +1529,8 @@ def ui():
                     },
                     yAxis: {
                         type: 'value',
+                        min: yMin,
+                        max: yMax,
                         axisLine: {
                             show: false
                         },
@@ -1817,7 +1961,7 @@ def ui():
 
             async function loadKnowledgeBase() {
                 const tbody = document.querySelector('#kbTable tbody');
-                tbody.innerHTML = '<tr><td colspan="4" class="text-center p-5"><div class="spinner-border text-primary" role="status"></div><div class="mt-2 text-muted small">Loading training data...</div></td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center p-5"><div class="spinner-border text-primary" role="status"></div><div class="mt-2 text-muted small">Loading training data...</div></td></tr>';
 
                 try {
                     const res = await fetch('/api/v0/get_training_data');
@@ -1825,7 +1969,7 @@ def ui():
                     KB_DATA = data || [];
 
                     if (!data || data.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted p-5">No training data found.</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-5">No training data found.</td></tr>';
                         return;
                     }
 
@@ -1839,6 +1983,7 @@ def ui():
 
                         return `
                         <tr>
+                            <td><input class="form-check-input kb-checkbox" type="checkbox" value="${item.id}" onchange="updateBatchDeleteBtn()"></td>
                             <td><span class="badge ${badgeClass} type-badge">${item.training_data_type}</span></td>
                             <td><div class="content-cell">${content}</div></td>
                             <td><div class="text-truncate" style="max-width: 200px;" title="${item.question || ''}">${item.question || '-'}</div></td>
@@ -1849,7 +1994,7 @@ def ui():
                         </tr>`;
                     }).join('');
                 } catch (e) {
-                    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger p-4">Error loading data: ${e.message}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger p-4">Error loading data: ${e.message}</td></tr>`;
                 }
             }
 
@@ -2003,6 +2148,57 @@ def ui():
                     }
 
                     loadKnowledgeBase();
+                } catch (e) {
+                    alert('Error: ' + e.message);
+                }
+            }
+
+            function toggleSelectAll() {
+                const selectAll = document.getElementById('selectAllKb');
+                const checkboxes = document.querySelectorAll('.kb-checkbox');
+                checkboxes.forEach(cb => cb.checked = selectAll.checked);
+                updateBatchDeleteBtn();
+            }
+
+            function updateBatchDeleteBtn() {
+                const checkboxes = document.querySelectorAll('.kb-checkbox:checked');
+                const btn = document.getElementById('batchDeleteBtn');
+                if (checkboxes.length > 0) {
+                    btn.style.display = 'inline-block';
+                    btn.innerHTML = `<i class="bi bi-trash me-1"></i>Delete (${checkboxes.length})`;
+                } else {
+                    btn.style.display = 'none';
+                }
+            }
+
+            async function batchDelete() {
+                const checkboxes = document.querySelectorAll('.kb-checkbox:checked');
+                if (checkboxes.length === 0) return;
+
+                if (!confirm(`Are you sure you want to delete ${checkboxes.length} items?`)) return;
+
+                const ids = Array.from(checkboxes).map(cb => cb.value);
+
+                try {
+                    const res = await fetch('/api/v0/training_data/batch_delete', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ids: ids})
+                    });
+
+                    if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.detail || 'Failed to batch delete');
+                    }
+                    
+                    const result = await res.json();
+                    if (result.errors && result.errors.length > 0) {
+                        alert(`Deleted ${result.deleted_count} items. Errors:\n${result.errors.join('\n')}`);
+                    }
+
+                    loadKnowledgeBase();
+                    document.getElementById('selectAllKb').checked = false;
+                    document.getElementById('batchDeleteBtn').style.display = 'none';
                 } catch (e) {
                     alert('Error: ' + e.message);
                 }

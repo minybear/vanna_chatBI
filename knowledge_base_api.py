@@ -11,6 +11,9 @@ class TrainingDataRequest(BaseModel):
     content: str
     question: Optional[str] = None
 
+class BatchDeleteRequest(BaseModel):
+    ids: List[str]
+
 @router.get("/get_training_data")
 def get_training_data():
     df = vn.get_training_data()
@@ -46,3 +49,26 @@ def delete_training_data(id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/training_data/batch_delete")
+def batch_delete_training_data(request: BatchDeleteRequest):
+    try:
+        deleted_count = 0
+        errors = []
+        for id in request.ids:
+            try:
+                success = vn.remove_training_data(id=id)
+                if success:
+                    deleted_count += 1
+                else:
+                    errors.append(f"Failed to remove {id}")
+            except Exception as e:
+                errors.append(f"Error removing {id}: {str(e)}")
+        
+        return {
+            "status": "success", 
+            "message": f"Deleted {deleted_count} items", 
+            "deleted_count": deleted_count,
+            "errors": errors
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
