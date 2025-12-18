@@ -14,9 +14,38 @@ from dotenv import load_dotenv
 import pandas as pd
 from pydantic import BaseModel
 from openai import OpenAI
+from typing import Optional, List, Dict
+from collections import defaultdict, deque
 
 # Load environment variables
 load_dotenv()
+
+# 对话历史管理（内存存储）
+class ConversationHistory:
+    """管理对话历史的简单内存存储"""
+    def __init__(self, max_history_per_session=10):
+        self.sessions = defaultdict(lambda: deque(maxlen=max_history_per_session))
+        self.max_history = max_history_per_session
+    
+    def add_message(self, session_id: str, role: str, content: str):
+        """添加一条消息到会话历史"""
+        self.sessions[session_id].append({
+            "role": role,
+            "content": content,
+            "timestamp": datetime.now().isoformat()
+        })
+    
+    def get_history(self, session_id: str) -> List[Dict]:
+        """获取指定会话的历史记录"""
+        return list(self.sessions[session_id])
+    
+    def clear_session(self, session_id: str):
+        """清除指定会话的历史"""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+
+# 初始化对话历史管理器
+conversation_history = ConversationHistory(max_history_per_session=10)
 
 class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
     def __init__(self, config=None):
@@ -58,9 +87,16 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
         else:
             return 'en'
 
-    def generate_sql_optimized(self, question: str, allow_llm_to_see_data=False, **kwargs):
+    def generate_sql_optimized(self, question: str, allow_llm_to_see_data=False, conversation_history: Optional[List[Dict]] = None, **kwargs):
         """
         Optimized version of generate_sql that returns both SQL and Explanation in a single pass.
+        支持对话历史上下文。
+        
+        Args:
+            question: 用户问题
+            allow_llm_to_see_data: 是否允许LLM查看数据
+            conversation_history: 对话历史列表，格式为 [{"role": "user/assistant", "content": "..."}]
+            **kwargs: 其他参数
         """
         # 0. 检测用户问题的语言
         user_lang = self.detect_language(question)
@@ -68,13 +104,11 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
         
         # 1. Retrieve Context
         question_sql_list = self.get_similar_question_sql(question, **kwargs)
+        
         ddl_list = self.get_related_ddl(question, **kwargs)
         doc_list = self.get_related_documentation(question, **kwargs)
 
         # 2. Construct Prompt (根据语言动态生成)
-        # #region agent log
-        t_start_prompt = time.time()
-        # #endregion
         
         # 获取当前时间信息
         from datetime import datetime
@@ -154,6 +188,8 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
                 "7. **MySQL关键提示**: 不要使用带格式字符串的 `UNIX_TIMESTAMP`（例如 `UNIX_TIMESTAMP(col, '%Y-%m-%d')` 是无效的）。`UNIX_TIMESTAMP()` 只接受 0 或 1 个参数。要格式化时间戳，请使用 `DATE_FORMAT(FROM_UNIXTIME(timestamp_col/1000), '%Y-%m-%d')`（如果是毫秒）或 `DATE_FORMAT(FROM_UNIXTIME(timestamp_col), '%Y-%m-%d')`（如果是秒）。\n"
                 "8. **语言要求**: 所有解释和说明文字必须使用中文。\n"
                 "9. **多数据库架构要求**: 本系统使用多数据库架构，SQL中的所有表名必须使用完全限定格式 `数据库名.表名`（例如: `SELECT * FROM database_name.table_name`）。绝不能省略数据库名，否则会导致执行错误。\n"
+                "10. **严禁参数化查询占位符**: SQL查询必须是完整可执行的语句，不要使用参数占位符如 `?` 或 `:param`。所有值必须直接嵌入SQL中（字符串用单引号包裹）。\n"
+                "11. **对话上下文**: 如果用户的问题中出现\"11月\"、\"上个月\"、\"本月\"等相对时间表述，请结合之前的对话历史和当前时间信息来理解用户的意图。\n"
             )
         else:
             initial_prompt += (
@@ -169,6 +205,8 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
                 "7. **CRITICAL for MySQL**: DO NOT use `UNIX_TIMESTAMP` with a format string (e.g., `UNIX_TIMESTAMP(col, '%Y-%m-%d')` is INVALID). `UNIX_TIMESTAMP()` only accepts 0 or 1 argument. To format a timestamp, use `DATE_FORMAT(FROM_UNIXTIME(timestamp_col/1000), '%Y-%m-%d')` (if ms) or `DATE_FORMAT(FROM_UNIXTIME(timestamp_col), '%Y-%m-%d')` (if seconds). \n"
                 "8. **Language requirement**: All explanations must be in English. \n"
                 "9. **Multi-Database Architecture Requirement**: This system uses a multi-database architecture. ALL table names in SQL queries MUST use the fully qualified format `database_name.table_name` (e.g., `SELECT * FROM database_name.table_name`). Never omit the database name or the query will fail. \n"
+                "10. **NO Parameterized Queries**: The SQL must be a complete executable statement. DO NOT use parameter placeholders like `?` or `:param`. All values must be embedded directly in the SQL (strings wrapped in single quotes). \n"
+                "11. **Conversation Context**: If the user mentions relative time expressions like \"last month\" or \"this month\", use the conversation history and current time information to understand their intent. \n"
             )
 
         message_log = [self.system_message(initial_prompt)]
@@ -177,6 +215,15 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
             if example is not None and "question" in example and "sql" in example:
                 message_log.append(self.user_message(example["question"]))
                 message_log.append(self.assistant_message(example["sql"]))
+
+        # 添加对话历史到消息日志（在示例之后，当前问题之前）
+        if conversation_history and len(conversation_history) > 0:
+            print(f"[DEBUG] 添加 {len(conversation_history)} 条对话历史到上下文")
+            for msg in conversation_history:
+                if msg['role'] == 'user':
+                    message_log.append(self.user_message(msg['content']))
+                elif msg['role'] == 'assistant':
+                    message_log.append(self.assistant_message(msg['content']))
 
         message_log.append(self.user_message(question))
 
@@ -249,7 +296,10 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
             raise err
 
 # Configuration for Zhipu AI (GLM-4)
-zhipu_embedding = ZhipuAIEmbeddingFunction(config={'api_key': os.getenv('ZHIPU_API_KEY')})
+zhipu_embedding = ZhipuAIEmbeddingFunction(config={
+    'api_key': os.getenv('ZHIPU_API_KEY'),
+    'api_base': os.getenv('ZHIPU_API_BASE')  # Pass api_base to embedding function
+})
 
 config = {
     'api_key': os.getenv('ZHIPU_API_KEY'),
@@ -286,6 +336,7 @@ app.add_middleware(
 
 class QuestionRequest(BaseModel):
     question: str
+    session_id: Optional[str] = None  # 支持会话ID以跟踪对话历史
 
 class SqlRequest(BaseModel):
     sql: str
@@ -340,15 +391,29 @@ def get_config():
 @app.post("/api/v0/generate_sql")
 def generate_sql(request: QuestionRequest):
     try:
-        # 0. 检测用户问题的语言
+        # 0. 获取或生成 session_id
+        import uuid
+        session_id = request.session_id or str(uuid.uuid4())
+        
+        # 0.1 检测用户问题的语言
         user_lang = vn.detect_language(request.question)
         
+        # 0.2 获取该会话的对话历史
+        history = conversation_history.get_history(session_id)
+        print(f"[DEBUG] Session ID: {session_id}, 历史记录数: {len(history)}")
+        
         # 1. Generate SQL using Optimized Vanna Method (Single Pass for SQL + Explanation)
-        raw_result = vn.generate_sql_optimized(question=request.question, allow_llm_to_see_data=True)
+        # 将对话历史传递给 generate_sql_optimized
+        raw_result = vn.generate_sql_optimized(
+            question=request.question, 
+            allow_llm_to_see_data=True,
+            conversation_history=history
+        )
         
         # 【调试日志】记录LLM原始输出,方便排查问题
         print(f"\n{'='*60}")
         print(f"[DEBUG] 用户问题: {request.question}")
+        print(f"[DEBUG] Session ID: {session_id}")
         print(f"[DEBUG] 检测语言: {'中文' if user_lang == 'zh' else '英文'}")
         print(f"[DEBUG] LLM原始回复:\n{raw_result}")
         print(f"{'='*60}\n")
@@ -450,18 +515,31 @@ def generate_sql(request: QuestionRequest):
             print(f"[DEBUG] {'成功提取SQL' if user_lang == 'zh' else 'Successfully extracted SQL'}: {clean_sql[:100]}...")
             print(f"[DEBUG] {'解释' if user_lang == 'zh' else 'Explanation'}: {explanation[:100]}...")
             
+            # 保存对话历史
+            conversation_history.add_message(session_id, "user", request.question)
+            conversation_history.add_message(session_id, "assistant", f"{explanation}\n\nSQL: {clean_sql}")
+            print(f"[DEBUG] 已保存对话历史到 session {session_id}")
+            
             return {
                 "sql": clean_sql,
                 "is_sql": True,
-                "explanation": explanation
+                "explanation": explanation,
+                "session_id": session_id  # 返回session_id给前端
             }
         else:
             # No SQL found, treat as conversational response
             print(f"[DEBUG] {'未检测到SQL，作为对话回复处理' if user_lang == 'zh' else 'No SQL detected, treating as conversational response'}")
+            
+            # 保存对话历史
+            conversation_history.add_message(session_id, "user", request.question)
+            conversation_history.add_message(session_id, "assistant", raw_result)
+            print(f"[DEBUG] 已保存对话历史到 session {session_id}")
+            
             return {
                 "text": raw_result,
                 "is_sql": False,
-                "explanation": raw_result
+                "explanation": raw_result,
+                "session_id": session_id  # 返回session_id给前端
             }
 
     except Exception as e:
@@ -518,6 +596,18 @@ def run_sql(request: SqlRequest):
     except Exception as e:
         # 其他未预期的错误
         error_msg = f"执行失败: {str(e)}"
+        print(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.post("/api/v0/clear_session")
+def clear_session(session_id: str = Body(..., embed=True)):
+    """清除指定会话的对话历史"""
+    try:
+        conversation_history.clear_session(session_id)
+        print(f"[DEBUG] 已清除 session {session_id} 的历史记录")
+        return {"success": True, "message": "会话历史已清除"}
+    except Exception as e:
+        error_msg = f"清除会话失败: {str(e)}"
         print(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
@@ -2193,7 +2283,7 @@ def ui():
                     
                     const result = await res.json();
                     if (result.errors && result.errors.length > 0) {
-                        alert(`Deleted ${result.deleted_count} items. Errors:\n${result.errors.join('\n')}`);
+                        alert(`Deleted ${result.deleted_count} items. Errors: ${result.errors.join(', ')}`);
                     }
 
                     loadKnowledgeBase();

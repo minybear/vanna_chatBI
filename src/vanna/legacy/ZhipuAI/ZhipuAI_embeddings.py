@@ -51,9 +51,14 @@ class ZhipuAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.api_key = config["api_key"]
         self.model_name = config.get("model_name", "embedding-2")
+        self.api_base = config.get("api_base")  # Store api_base if provided
 
         try:
-            self.client = ZhipuAI(api_key=self.api_key)
+            # ZhipuAI SDK supports base_url parameter
+            init_kwargs = {"api_key": self.api_key}
+            if self.api_base:
+                init_kwargs["base_url"] = self.api_base
+            self.client = ZhipuAI(**init_kwargs)
         except Exception as e:
             raise ValueError(f"Error initializing ZhipuAI client: {e}")
 
@@ -63,17 +68,27 @@ class ZhipuAIEmbeddingFunction(EmbeddingFunction[Documents]):
         all_embeddings = []
         print(f"Generating embeddings for {len(input)} documents")
 
-        # Iterating over each document for individual API calls
-        for document in input:
-            try:
-                response = self.client.embeddings.create(
-                    model=self.model_name, input=document
-                )
-                # print(response)
-                embedding = response.data[0].embedding
-                all_embeddings.append(embedding)
-                # print(f"Cost required: {response.usage.total_tokens}")
-            except Exception as e:
-                raise ValueError(f"Error generating embedding for document: {e}")
+        # Iterating over each document for individual API calls with retry mechanism
+        import time
+        max_retries = 3
+        retry_delay = 1  # seconds
+        
+        for idx, document in enumerate(input):
+            for attempt in range(max_retries):
+                try:
+                    response = self.client.embeddings.create(
+                        model=self.model_name, input=document
+                    )
+                    embedding = response.data[0].embedding
+                    all_embeddings.append(embedding)
+                    break  # Success, exit retry loop
+                    
+                except Exception as e:
+                    # If this is not the last attempt, wait before retrying
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                    else:
+                        # Last attempt failed, raise the error
+                        raise ValueError(f"Error generating embedding for document after {max_retries} attempts: {e}")
 
         return all_embeddings
