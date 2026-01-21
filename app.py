@@ -23,6 +23,17 @@ from typing import Optional, List, Dict
 # Load environment variables
 load_dotenv()
 
+# 【调试】打印关键环境变量加载状态
+print("="*60)
+print("[ENV CHECK] 环境变量加载状态:")
+print(f"  - ZHIPU_API_KEY: {'已设置' if os.getenv('ZHIPU_API_KEY') else '❌ 未设置'}")
+print(f"  - DB_HOST: {'已设置' if os.getenv('DB_HOST') else '❌ 未设置'}")
+print(f"  - LARK_WEBHOOK_URL: {'已设置 ✅' if os.getenv('LARK_WEBHOOK_URL') else '❌ 未设置'}")
+if os.getenv('LARK_WEBHOOK_URL'):
+    webhook_url = os.getenv('LARK_WEBHOOK_URL')
+    print(f"  - Webhook URL (前40字符): {webhook_url[:40]}...")
+print("="*60)
+
 # 对话历史管理（ChromaDB 持久化存储）
 class SimpleEmbeddingFunction:
     def __init__(self, dim: int = 8):
@@ -1076,9 +1087,20 @@ class FeedbackRequest(BaseModel):
     comment: str = None
 
 def send_lark_alert(feedback: FeedbackRequest):
+    """发送点踩反馈到飞书群"""
     url = os.getenv("LARK_WEBHOOK_URL")
+    
+    print(f"\n[飞书通知] 准备发送点踩反馈...")
+    print(f"[飞书通知] Webhook URL 状态: {'已配置 ✅' if url else '❌ 未配置'}")
+    
     if not url:
-        print("Error: LARK_WEBHOOK_URL is not set.")
+        print("=" * 60)
+        print("❌ 错误: LARK_WEBHOOK_URL 环境变量未设置")
+        print("解决方法:")
+        print("  1. 在 .env 文件中添加: LARK_WEBHOOK_URL=你的webhook地址")
+        print("  2. 确保 .env 文件在项目根目录")
+        print("  3. 重启应用使配置生效")
+        print("=" * 60)
         return
 
     # 构造飞书卡片消息
@@ -1094,7 +1116,7 @@ def send_lark_alert(feedback: FeedbackRequest):
                 {"tag": "div", "text": {"tag": "lark_md", "content": f"**用户提问:**\n{feedback.question}"}},
                 {"tag": "hr"},
                 {"tag": "div", "text": {"tag": "lark_md", "content": f"**生成的 SQL:**\n```sql\n{feedback.sql}\n```"}},
-                {"tag": "div", "text": {"tag": "lark_md", "content": f"**解释:**\n{feedback.explanation}"}},
+                {"tag": "div", "text": {"tag": "lark_md", "content": f"**解释:**\n{feedback.explanation or '无'}"}},
                 {"tag": "hr"},
                 {"tag": "note", "elements": [{"tag": "plain_text", "content": f"反馈时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}]}
             ]
@@ -1102,10 +1124,26 @@ def send_lark_alert(feedback: FeedbackRequest):
     }
 
     try:
-        resp = requests.post(url, json=payload)
-        print(f"Lark response: {resp.text}")
+        print(f"[飞书通知] 正在发送到: {url[:50]}...")
+        resp = requests.post(url, json=payload, timeout=5)
+        
+        if resp.status_code == 200:
+            result = resp.json()
+            if result.get("code") == 0:
+                print(f"[飞书通知] ✅ 发送成功！")
+            else:
+                print(f"[飞书通知] ⚠️ 飞书返回错误: {result}")
+        else:
+            print(f"[飞书通知] ❌ HTTP错误: {resp.status_code}, 响应: {resp.text}")
+            
+    except requests.exceptions.Timeout:
+        print(f"[飞书通知] ❌ 请求超时，请检查网络连接")
+    except requests.exceptions.RequestException as e:
+        print(f"[飞书通知] ❌ 网络错误: {e}")
     except Exception as e:
-        print(f"Failed to send Lark alert: {e}")
+        print(f"[飞书通知] ❌ 未知错误: {e}")
+        import traceback
+        traceback.print_exc()
 
 @app.get("/api/v0/config")
 def get_config():
