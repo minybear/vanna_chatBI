@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>redtea chatBi</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        :root {
+            --vanna-teal: #15a8a8;
+            --vanna-navy: #023d60;
+            --vanna-bg: #f8fafc;
+            --vanna-surface: #ffffff;
+            --vanna-border: #e2e8f0;
+            --vanna-text: #0f172a;
+            --vanna-text-dim: #64748b;
+        }
+
+        body {
+            background-color: var(--vanna-bg);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            font-family: 'Space Grotesk', sans-serif;
+            color: var(--vanna-text);
+            overflow: hidden;
+        }
+
+        .navbar {
+            background: rgba(255, 255, 255, 0.8) !important;
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--vanna-border);
+            height: 60px;
+            flex-shrink: 0;
+            z-index: 1000;
+        }
+
+        .brand-logo {
+            height: 28px;
+            width: auto;
+            display: block;
+        }
+
+        .app-container {
+            display: flex;
+            height: calc(100vh - 60px);
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 260px;
+            background: var(--vanna-surface);
+            border-right: 1px solid var(--vanna-border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            transition: width 0.3s ease;
+        }
+        
+        .sidebar.collapsed {
+            width: 0;
+            overflow: hidden;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Session List */
+        .session-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            border-radius: 8px;
+            margin-bottom: 4px;
+            transition: all 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            color: var(--vanna-text-dim);
+        }
+        
+        .session-item:hover {
+            background-color: #f1f5f9;
+            color: var(--vanna-text);
+        }
+        
+        .session-item.active {
+            background-color: rgba(21, 168, 168, 0.1);
+            color: var(--vanna-teal);
+            font-weight: 500;
+        }
+
+        .session-title {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+        }
+
+        .session-actions {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .session-item:hover .session-actions {
+            opacity: 1;
+        }
+
+        /* Chat View */
+        .chat-view {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-container { 
+            flex: 1; 
+            overflow-y: auto; 
+            padding: 24px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 24px; 
+            max-width: 1000px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .message-wrapper { display: flex; gap: 12px; max-width: 85%; animation: fadeIn 0.3s ease; }
+        .message-wrapper.user { align-self: flex-end; flex-direction: row-reverse; }
+        .message-wrapper.ai { align-self: flex-start; }
+
+        .avatar {
+            width: 36px; height: 36px;
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            font-size: 18px;
+            overflow: hidden;
+        }
+        .avatar.ai { 
+            background: rgba(21, 168, 168, 0.1); 
+            color: var(--vanna-teal);
+            padding: 0;
+        }
+        .avatar.ai img { width: 100%; height: 100%; object-fit: cover; }
+        .avatar.user { background: var(--vanna-navy); color: white; }
+
+        .message-bubble {
+            padding: 16px 20px;
+            border-radius: 18px;
+            position: relative;
+            line-height: 1.6;
+            font-size: 15px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .message-wrapper.user .message-bubble {
+            background: linear-gradient(135deg, #15a8a8 0%, #0e8a8a 100%);
+            color: white;
+            border-top-right-radius: 4px;
+        }
+
+        .message-wrapper.ai .message-bubble {
+            background: var(--vanna-surface);
+            border: 1px solid var(--vanna-border);
+            color: var(--vanna-text);
+            border-top-left-radius: 4px;
+        }
+
+        /* Data Card */
+        .data-card {
+            margin-top: 12px;
+            border: 1px solid var(--vanna-border);
+            border-radius: 12px;
+            overflow: visible;
+            background: #fff;
+        }
+
+        .data-card-header {
+            padding: 12px 16px;
+            background: #f8fafc;
+            border-bottom: 1px solid var(--vanna-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .data-card-title { font-size: 13px; font-weight: 600; color: var(--vanna-text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+
+        .sql-block {
+            background-color: #1e293b;
+            color: #e2e8f0;
+            padding: 16px;
+            font-family: 'Space Mono', monospace;
+            font-size: 13px;
+            margin: 0;
+            overflow-x: auto;
+        }
+
+        .feedback-actions { margin-top: 8px; display: flex; gap: 8px; opacity: 0.6; transition: opacity 0.2s; }
+        .message-wrapper:hover .feedback-actions { opacity: 1; }
+        .feedback-btn { border: none; background: none; color: var(--vanna-text-dim); cursor: pointer; padding: 4px 8px; font-size: 13px; border-radius: 6px; }
+        .feedback-btn:hover { background: #f1f5f9; color: var(--vanna-teal); }
+        .feedback-btn.active-up { color: #10b981; background: rgba(16, 185, 129, 0.1); }
+        .feedback-btn.active-down { color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+
+        .input-area { 
+            padding: 20px; 
+            background: var(--vanna-surface); 
+            border-top: 1px solid var(--vanna-border); 
+            flex-shrink: 0;
+        }
+        .input-container-inner {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .input-group {
+            background: var(--vanna-bg);
+            border: 1px solid var(--vanna-border);
+            border-radius: 16px;
+            padding: 6px;
+            transition: all 0.2s;
+        }
+        .input-group:focus-within {
+            border-color: var(--vanna-teal);
+            box-shadow: 0 0 0 3px rgba(21, 168, 168, 0.1);
+            background: #fff;
+        }
+        .form-control { border: none; background: transparent; padding: 12px 16px; font-size: 15px; }
+        .form-control:focus { background: transparent; box-shadow: none; }
+        .btn-send {
+            width: 40px; height: 40px;
+            border-radius: 12px;
+            background: var(--vanna-teal);
+            border: none;
+            color: white;
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 0.2s;
+        }
+        .btn-send:hover { background: #0e8a8a; transform: scale(1.05); }
+
+        /* KB Styles */
+        .kb-view {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            display: none;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        .kb-view.active { display: block; }
+
+        .type-badge { font-size: 11px; padding: 4px 8px; border-radius: 6px; font-weight: 600; text-transform: uppercase; }
+        .type-ddl { background: rgba(2, 61, 96, 0.1); color: var(--vanna-navy); }
+        .type-doc { background: rgba(21, 168, 168, 0.1); color: var(--vanna-teal); }
+        .type-sql { background: rgba(245, 158, 11, 0.1); color: #d97706; }
+        .content-cell {
+            font-family: 'Space Mono', monospace;
+            font-size: 12px;
+            background: var(--vanna-bg);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--vanna-border);
+            max-height: 100px;
+            overflow-y: auto;
+        }
+        .explanation-text { margin-bottom: 8px; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .typing-indicator span { width: 6px; height: 6px; background-color: var(--vanna-text-dim); border-radius: 50%; animation: bounce 1.4s infinite ease-in-out both; display: inline-block; margin: 0 2px; }
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+        @media (max-width: 768px) {
+            .sidebar { position: absolute; height: 100%; z-index: 100; transform: translateX(-100%); transition: transform 0.3s ease; }
+            .sidebar.show { transform: translateX(0); }
+            .main-content { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light fixed-top">
+        <div class="container-fluid px-4">
+            <button class="btn btn-link text-dark p-0 me-3 d-md-none" onclick="toggleSidebar()">
+                <i class="bi bi-list fs-4"></i>
+            </button>
+            <a class="navbar-brand fw-bold d-flex align-items-center" href="#" aria-label="redtea chatBi">
+                <img src="/img/new-logo.b35e98b5.png" alt="redtea chatBi logo" class="brand-logo">
+            </a>
+            <div class="d-flex align-items-center">
+                <button class="btn btn-outline-secondary btn-sm me-2" onclick="switchView('kb')">
+                    <i class="bi bi-database me-1"></i>Knowledge Base
+                </button>
+                <button class="btn btn-outline-primary btn-sm" onclick="switchView('chat')">
+                    <i class="bi bi-chat-dots me-1"></i>Chat
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="app-container" style="margin-top: 60px;">
+        <div class="sidebar" id="sidebar">
+            <div class="p-3 border-bottom">
+                <button class="btn btn-primary w-100 rounded-pill shadow-sm" onclick="createNewSession()">
+                    <i class="bi bi-plus-lg me-2"></i>New Chat
+                </button>
+            </div>
+            <div class="flex-grow-1 overflow-auto p-2" id="sessionList"></div>
+        </div>
+        
+        <div class="main-content">
+            <div id="chatView" class="chat-view">
+                <div class="chat-container" id="chatBox">
+                    <div class="message-wrapper ai">
+                        <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
+                        <div class="message-bubble">Hello! I'm connected to your database. Ask me anything about your data!</div>
+                    </div>
+                </div>
+                <div class="input-area">
+                    <div class="input-container-inner">
+                        <div class="input-group">
+                            <input type="text" id="questionInput" class="form-control" placeholder="Ask a question about your data..." onkeypress="if(event.key==='Enter') ask()">
+                            <button class="btn btn-send" onclick="ask()"><i class="bi bi-send-fill"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="kbView" class="kb-view">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h5 class="mb-0 fw-bold">Training Data Management</h5>
+                    <div>
+                        <button class="btn btn-sm btn-success me-2 rounded-pill px-3" onclick="showAddModal()"><i class="bi bi-plus-lg me-1"></i>Add Data</button>
+                        <button class="btn btn-sm btn-danger me-2 rounded-pill px-3" onclick="batchDelete()" id="batchDeleteBtn" style="display:none;"><i class="bi bi-trash me-1"></i>Batch Delete</button>
+                        <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="loadKnowledgeBase()"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+                    </div>
+                </div>
+                <div class="card border-0 shadow-sm">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0" id="kbTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 40px" class="ps-3"><input class="form-check-input" type="checkbox" id="selectAllKb" onclick="toggleSelectAll()"></th>
+                                    <th style="width: 100px">Type</th>
+                                    <th>Content / SQL</th>
+                                    <th style="width: 25%">Related Question</th>
+                                    <th style="width: 100px" class="text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td colspan="5" class="text-center p-5 text-muted">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="addModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold">Add Training Data</h5>
+                    <button type="button" class="btn-close" onclick="hideAddModal()"></button>
+                </div>
+                <div class="modal-body pt-4">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">DATA TYPE</label>
+                        <select class="form-select" id="addType" onchange="toggleAddFields()">
+                            <option value="documentation">Documentation</option>
+                            <option value="sql">SQL (QA Pair)</option>
+                            <option value="ddl">DDL (Schema)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3" id="questionGroup" style="display:none;">
+                        <label class="form-label small fw-bold text-muted">QUESTION</label>
+                        <input type="text" class="form-control bg-light" id="addQuestion" placeholder="e.g. How many users?">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted" id="contentLabel">CONTENT</label>
+                        <textarea class="form-control bg-light" id="addContent" rows="6" style="font-family: monospace; font-size: 13px;"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-light rounded-pill px-4" onclick="hideAddModal()">Cancel</button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="submitData()">Save Data</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let APP_CONFIG = { show_sql: false };
+        let CHAT_HISTORY = {};
+        let CHART_INSTANCES = {};
+        let currentSessionId = null;
+        let KB_DATA = [];
+
+        window.onload = async () => {
+            try {
+                const res = await fetch('/api/v0/config');
+                APP_CONFIG = await res.json();
+            } catch (e) { console.error("Config error", e); }
+
+            await loadSessions();
+            
+            const sessionsList = document.querySelectorAll('.session-item');
+            if(sessionsList.length > 0) {
+                 createNewSession(); 
+            } else {
+                 createNewSession();
+            }
+        };
+
+        function switchView(view) {
+            document.getElementById('chatView').style.display = view === 'chat' ? 'flex' : 'none';
+            document.getElementById('kbView').classList.toggle('active', view === 'kb');
+            if(view === 'kb') loadKnowledgeBase();
+        }
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('show');
+        }
+
+        async function loadSessions() {
+            try {
+                const res = await fetch('/api/v0/sessions');
+                const sessions = await res.json();
+                renderSessionList(sessions);
+            } catch(e) {
+                console.error("Failed to load sessions", e);
+            }
+        }
+
+        function renderSessionList(sessions) {
+            const container = document.getElementById('sessionList');
+            container.innerHTML = sessions.map(s => `
+                <div class="session-item ${s.id === currentSessionId ? 'active' : ''}" onclick="selectSession('${s.id}')" data-id="${s.id}">
+                    <div class="session-title"><i class="bi bi-chat-left-text me-2"></i>${s.title}</div>
+                    <div class="session-actions">
+                        <i class="bi bi-trash text-danger" onclick="deleteSession(event, '${s.id}')" title="Delete"></i>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function createNewSession() {
+            currentSessionId = 'session-' + Date.now();
+            const chatBox = document.getElementById('chatBox');
+            chatBox.innerHTML = `
+                <div class="message-wrapper ai">
+                    <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
+                    <div class="message-bubble">Hello! I'm connected to your database. Ask me anything about your data!</div>
+                </div>
+            `;
+            const res = await fetch('/api/v0/sessions');
+            const sessions = await res.json();
+            renderSessionList(sessions);
+        }
+
+        async function selectSession(sessionId) {
+            if (currentSessionId === sessionId) return;
+            currentSessionId = sessionId;
+            document.querySelectorAll('.session-item').forEach(el => {
+                el.classList.toggle('active', el.dataset.id === sessionId);
+            });
+
+            const chatBox = document.getElementById('chatBox');
+            chatBox.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary" role="status"></div></div>';
+            
+            try {
+                const res = await fetch(`/api/v0/history/${sessionId}`);
+                const history = await res.json();
+                chatBox.innerHTML = '';
+                if (history.length === 0) {
+                     chatBox.innerHTML = `<div class="text-center text-muted mt-5">Empty conversation</div>`;
+                }
+                history.forEach(msg => renderHistoryMessage(msg));
+                chatBox.scrollTop = chatBox.scrollHeight;
+            } catch(e) {
+                console.error("Failed to load history", e);
+                chatBox.innerHTML = `<div class="text-center text-danger mt-5">Failed to load history</div>`;
+            }
+        }
+
+        async function deleteSession(event, sessionId) {
+            event.stopPropagation();
+            if(!confirm("Delete this chat?")) return;
+            try {
+                await fetch(`/api/v0/sessions/${sessionId}`, { method: 'DELETE' });
+                if(currentSessionId === sessionId) {
+                    createNewSession();
+                } else {
+                    loadSessions();
+                }
+            } catch(e) { alert("Failed to delete session"); }
+        }
+
+        async function ask() {
+            const input = document.getElementById('questionInput');
+            const question = input.value.trim();
+            if (!question) return;
+
+            appendMessage('user', question);
+            input.value = '';
+
+            const loadingId = 'loading-' + Date.now();
+            appendLoading(loadingId);
+
+            try {
+                const sqlRes = await fetch('/api/v0/generate_sql', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        question,
+                        session_id: currentSessionId
+                    })
+                });
+
+                if (!sqlRes.ok) {
+                    const errorData = await sqlRes.json();
+                    throw new Error(errorData.detail || 'SQL Generation Failed');
+                }
+
+                const sqlData = await sqlRes.json();
+                if (sqlData.session_id) {
+                    currentSessionId = sqlData.session_id;
+                    loadSessions(); 
+                }
+
+                const loadingDiv = document.getElementById(loadingId);
+                
+                if (sqlData.is_sql) {
+                    const explanation = sqlData.explanation || "Here are the results:";
+                    const displayStyle = APP_CONFIG.show_sql ? 'block' : 'none';
+                    const msgId = 'msg-' + Date.now();
+                    const intent = sqlData.intent || null;
+
+                    CHAT_HISTORY[msgId] = {
+                        question: question,
+                        sql: sqlData.sql,
+                        explanation: explanation,
+                        intent: intent
+                    };
+
+                    loadingDiv.innerHTML = `
+                        <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
+                        <div class="message-bubble" style="width: 100%">
+                            <div class="explanation-text">${explanation}</div>
+                            <div class="data-card" style="display: ${displayStyle}">
+                                <div class="data-card-header"><span class="data-card-title">Generated SQL</span></div>
+                                <pre class="sql-block">${sqlData.sql}</pre>
+                            </div>
+                            <div class="d-flex align-items-center mt-3 text-muted small"><div class="spinner-border spinner-border-sm me-2 text-primary" role="status"></div>Running query on database...</div>
+                        </div>
+                    `;
+
+                    let runData = null;
+                    if (Array.isArray(sqlData.result) && Array.isArray(sqlData.columns)) {
+                        runData = {
+                            result: sqlData.result,
+                            columns: sqlData.columns,
+                            chart: sqlData.chart,
+                            intent: intent
+                        };
+                    } else {
+                        const runRes = await fetch('/api/v0/run_sql', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({sql: sqlData.sql, question: question})
+                        });
+
+                        if (!runRes.ok) {
+                             const errorData = await runRes.json();
+                             throw new Error(errorData.detail || 'SQL Execution Failed');
+                        }
+                        
+                        runData = await runRes.json();
+                        runData.intent = intent;
+                    }
+                    const columns = runData.columns || [];
+                    const result = runData.result || [];
+                    
+                    const tableHtml = buildResultTable(columns, result);
+                    
+                    loadingDiv.innerHTML = `
+                        <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
+                        <div class="message-bubble" style="width: 100%">
+                            <div class="explanation-text">${explanation}</div>
+                            
+                            <div class="data-card mb-3" style="display: ${displayStyle}">
+                                <div class="data-card-header"><span class="data-card-title">Generated SQL</span></div>
+                                <pre class="sql-block">${sqlData.sql}</pre>
+                            </div>
+
+                            <div id="chart-card-${msgId}" class="data-card mb-3" style="display:none;">
+                                <div class="data-card-header">
+                                    <span class="data-card-title"><i class="bi bi-bar-chart-fill me-2"></i>Visualization</span>
+                                    <div class="btn-group btn-group-sm">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="downloadChart('${msgId}', 'png')"><i class="bi bi-download"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleFullscreen('chart-container-${msgId}')"><i class="bi bi-arrows-fullscreen"></i></button>
+                                    </div>
+                                </div>
+                                <div id="chart-container-${msgId}" style="width:100%; min-height:400px; padding:20px;"></div>
+                            </div>
+
+                            <div class="data-card">
+                                <div class="data-card-header">
+                                    <span class="data-card-title">Result Data</span>
+                                    <span class="badge bg-light text-dark border">${result.length} rows</span>
+                                </div>
+                                ${tableHtml}
+                            </div>
+                            
+                            <div class="feedback-actions">
+                                <button class="feedback-btn" onclick="submitFeedback('${msgId}', 'up', this)"><i class="bi bi-hand-thumbs-up"></i> Helpful</button>
+                                <button class="feedback-btn" onclick="submitFeedback('${msgId}', 'down', this)"><i class="bi bi-hand-thumbs-down"></i> Not Helpful</button>
+                            </div>
+                        </div>
+                    `;
+                    
+                    if ((result && result.length > 0 && columns && columns.length > 0) || runData?.chart) {
+                        try {
+                            const chartCard = document.getElementById(`chart-card-${msgId}`);
+                            const chartContainer = document.getElementById(`chart-container-${msgId}`);
+                            chartCard.style.display = 'block';
+                            try {
+                                if (runData?.chart) {
+                                    renderPlotlyChart(chartContainer, runData.chart, msgId);
+                                } else {
+                                    renderECharts(chartContainer, null, result, columns, msgId, runData?.intent);
+                                }
+                            } catch (chartError) {
+                                console.warn("Chart render failed:", chartError);
+                                chartCard.style.display = 'none';
+                            }
+                        } catch (e) {
+                            console.error("Chart render error", e);
+                        }
+                    }
+
+                } else {
+                    loadingDiv.innerHTML = `
+                        <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
+                        <div class="message-bubble">${sqlData.text}</div>
+                    `;
+                }
+                loadingDiv.id = '';
+
+            } catch (e) {
+                const loadingDiv = document.getElementById(loadingId);
+                if(loadingDiv) {
+                    loadingDiv.innerHTML = `
+                        <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-exclamation-triangle-fill text-danger&quot;></i>'"></div>
+                        <div class="message-bubble text-danger border-danger bg-light">
+                            <strong>Error:</strong> ${e.message}
+                        </div>
+                    `;
+                    loadingDiv.id = '';
+                }
+            }
+        }
+
+        function renderHistoryMessage(msg) {
+            if (!msg) return;
+            if (msg.role === 'user') {
+                appendMessage('user', msg.content || '', false);
+                return;
+            }
+            if (msg.sql || msg.result || msg.chart || msg.columns) {
+                const msgId = msg.id || ('msg-' + Date.now());
+                let explanation = msg.explanation || msg.content || '';
+                if (!APP_CONFIG.show_sql && !msg.explanation && explanation.includes('SQL:')) {
+                    explanation = explanation.split('SQL:')[0].trim();
+                }
+                const question = msg.question || '';
+                CHAT_HISTORY[msgId] = {
+                    question: question,
+                    sql: msg.sql || '',
+                    explanation: explanation,
+                    intent: msg.intent || null
+                };
+                appendAssistantDataMessage({
+                    msgId,
+                    explanation,
+                    sql: msg.sql,
+                    result: msg.result,
+                    columns: msg.columns,
+                    chart: msg.chart,
+                    intent: msg.intent || null
+                });
+                return;
+            }
+            appendMessage('assistant', msg.content || '', false);
+        }
+
+        function appendMessage(role, text, autoScroll=true) {
+            const chatBox = document.getElementById('chatBox');
+            const div = document.createElement('div');
+            div.className = `message-wrapper ${role}`;
+
+            if (role === 'user') {
+                div.innerHTML = `<div class="avatar user"><i class="bi bi-person-fill"></i></div><div class="message-bubble">${text}</div>`;
+            } else {
+                div.innerHTML = `<div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div><div class="message-bubble">${text}</div>`;
+            }
+
+            chatBox.appendChild(div);
+            if(autoScroll) chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function appendLoading(id) {
+            const chatBox = document.getElementById('chatBox');
+            const div = document.createElement('div');
+            div.className = 'message-wrapper ai';
+            div.id = id;
+            div.innerHTML = `<div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div><div class="message-bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function buildResultTable(columns, result) {
+            let tableHtml = '<div class="table-responsive" style="max-height: 400px; overflow-y: auto; overflow-x: auto;"><table class="table table-sm table-hover mb-0" style="font-size: 13px; white-space: nowrap;">';
+            if (columns.length > 0) {
+                tableHtml += '<thead class="table-light sticky-top"><tr>' + columns.map(c => `<th style="padding: 10px 12px;">${c}</th>`).join('') + '</tr></thead><tbody>';
+                if (result.length === 0) {
+                    tableHtml += `<tr><td colspan="${columns.length}" class="text-center text-muted p-3">No results found</td></tr>`;
+                } else {
+                    result.forEach(row => {
+                        tableHtml += '<tr>' + columns.map(c => `<td style="padding: 8px 12px;">${row[c] !== null ? row[c] : ''}</td>`).join('') + '</tr>';
+                    });
+                }
+            } else {
+                tableHtml += '<tbody><tr><td class="text-center text-muted p-3">No data columns returned</td></tr>';
+            }
+            tableHtml += '</tbody></table></div>';
+            return tableHtml;
+        }
+
+        function appendAssistantDataMessage({msgId, explanation, sql, result, columns, chart, intent}) {
+            const chatBox = document.getElementById('chatBox');
+            const displayStyle = APP_CONFIG.show_sql ? 'block' : 'none';
+            const safeResult = Array.isArray(result) ? result : [];
+            const safeColumns = Array.isArray(columns) ? columns : [];
+            const tableHtml = buildResultTable(safeColumns, safeResult);
+
+            const div = document.createElement('div');
+            div.className = 'message-wrapper ai';
+            div.innerHTML = `
+                <div class="avatar ai"><img src="/img/Attached_image.png" alt="AI Avatar" onerror="this.style.display='none';this.parentElement.innerHTML='<i class=&quot;bi bi-robot&quot;></i>'"></div>
+                <div class="message-bubble" style="width: 100%">
+                    <div class="explanation-text">${explanation || ''}</div>
+                    <div class="data-card mb-3" style="display: ${displayStyle}">
+                        <div class="data-card-header"><span class="data-card-title">Generated SQL</span></div>
+                        <pre class="sql-block">${sql || ''}</pre>
+                    </div>
+                    <div id="chart-card-${msgId}" class="data-card mb-3" style="display:none;">
+                        <div class="data-card-header">
+                            <span class="data-card-title"><i class="bi bi-bar-chart-fill me-2"></i>Visualization</span>
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="downloadChart('${msgId}', 'png')"><i class="bi bi-download"></i></button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleFullscreen('chart-container-${msgId}')"><i class="bi bi-arrows-fullscreen"></i></button>
+                            </div>
+                        </div>
+                        <div id="chart-container-${msgId}" style="width:100%; min-height:400px; padding:20px;"></div>
+                    </div>
+                    <div class="data-card">
+                        <div class="data-card-header">
+                            <span class="data-card-title">Result Data</span>
+                            <span class="badge bg-light text-dark border">${safeResult.length} rows</span>
+                        </div>
+                        ${tableHtml}
+                    </div>
+                    <div class="feedback-actions">
+                        <button class="feedback-btn" onclick="submitFeedback('${msgId}', 'up', this)"><i class="bi bi-hand-thumbs-up"></i> Helpful</button>
+                        <button class="feedback-btn" onclick="submitFeedback('${msgId}', 'down', this)"><i class="bi bi-hand-thumbs-down"></i> Not Helpful</button>
+                    </div>
+                </div>
+            `;
+
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            if ((safeResult.length > 0 && safeColumns.length > 0) || chart) {
+                try {
+                    const chartCard = document.getElementById(`chart-card-${msgId}`);
+                    const chartContainer = document.getElementById(`chart-container-${msgId}`);
+                    chartCard.style.display = 'block';
+                    try {
+                        if (chart) {
+                            renderPlotlyChart(chartContainer, chart, msgId);
+                        } else {
+                            renderECharts(chartContainer, null, safeResult, safeColumns, msgId, intent);
+                        }
+                    } catch (chartError) {
+                        console.warn("Chart render failed:", chartError);
+                        chartCard.style.display = 'none';
+                    }
+                } catch (e) {
+                    console.error("Chart render error", e);
+                }
+            }
+        }
+
+        function renderECharts(container, chartJsonStr, resultData, columns, msgId, intent) {
+            if (!resultData || resultData.length === 0 || !columns || columns.length === 0) throw new Error('No data');
+            const echartsOption = smartGenerateChart(resultData, columns, intent);
+            container.style.height = '400px';
+            const chart = echarts.init(container, null, { renderer: 'canvas', useDirtyRect: false });
+            chart.setOption(echartsOption);
+            CHART_INSTANCES[msgId] = { type: 'echarts', chart };
+            window.addEventListener('resize', () => chart.resize());
+            return chart;
+        }
+
+        function renderPlotlyChart(container, chartJsonStr, msgId) {
+            if (!chartJsonStr) throw new Error('No chart data');
+            let fig = chartJsonStr;
+            if (typeof chartJsonStr === 'string') {
+                fig = JSON.parse(chartJsonStr);
+            }
+            if (!fig || !fig.data) throw new Error('Invalid chart data');
+            Plotly.newPlot(container, fig.data, fig.layout || {}, fig.config || {responsive: true});
+            CHART_INSTANCES[msgId] = { type: 'plotly', chart: container };
+        }
+        
+        function isLongFormatTimeSeries(resultData, columns) {
+            if (columns.length !== 3) return null;
+            const [col1, col2, col3] = columns;
+            const col1Lower = col1.toLowerCase();
+            const col2Lower = col2.toLowerCase();
+            const isDateColumn = col1Lower.match(/date|time|day|month|year|dt|stat|hour/);
+            const isCategoryColumn = col2Lower.match(/type|category|name|kind|group|measure/);
+            if (isDateColumn && isCategoryColumn) {
+                const firstVal = resultData[0]?.[col1];
+                if (firstVal) {
+                    const valStr = firstVal.toString();
+                    if (valStr.match(/^\d{8}$/) || valStr.match(/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/) || valStr.match(/^\d{4}[-/]\d{1,2}/)) {
+                        return {dateCol: col1, categoryCol: col2, valueCol: col3};
+                    }
+                }
+            }
+            return null;
+        }
+
+        function transformLongToWide(resultData, dateCol, categoryCol, valueCol) {
+            const categories = [...new Set(resultData.map(row => row[categoryCol]))];
+            const dateGroups = {};
+            resultData.forEach(row => {
+                const date = row[dateCol];
+                if (!dateGroups[date]) dateGroups[date] = {};
+                dateGroups[date][row[categoryCol]] = row[valueCol];
+            });
+            const wideData = Object.keys(dateGroups).map(date => {
+                const row = {[dateCol]: date};
+                categories.forEach(cat => row[cat] = dateGroups[date][cat] || 0);
+                return row;
+            });
+            wideData.sort((a, b) => a[dateCol].toString().localeCompare(b[dateCol].toString()));
+            return { data: wideData, columns: [dateCol, ...categories] };
+        }
+
+        function formatDate(dateValue) {
+            const dateStr = dateValue.toString();
+            if (dateStr.match(/^\d{8}$/)) return dateStr.substring(0, 4) + '-' + dateStr.substring(4, 6) + '-' + dateStr.substring(6, 8);
+            if (dateStr.match(/^\d{6}$/)) return dateStr.substring(0, 4) + '-' + dateStr.substring(4, 6);
+            return dateStr;
+        }
+
+        function detectColumnTypes(resultData, columns) {
+            const columnTypes = {};
+            columns.forEach(col => {
+                let numericCount = 0;
+                let totalCount = 0;
+                resultData.forEach(row => {
+                    const val = row[col];
+                    if (val !== null && val !== undefined && val !== '') {
+                        totalCount++;
+                        if (!isNaN(Number(val)) && val !== true && val !== false) numericCount++;
+                    }
+                });
+                columnTypes[col] = (totalCount > 0 && numericCount / totalCount >= 0.8) ? 'numeric' : 'text';
+            });
+            return columnTypes;
+        }
+
+        function detectChartType(resultData, columns, columnTypes = null, intent = null) {
+            const xColumn = columns[0];
+            if (!columnTypes) columnTypes = detectColumnTypes(resultData, columns);
+            const yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
+            const longFormat = isLongFormatTimeSeries(resultData, columns);
+            if (intent && intent.preferred_chart === 'line') {
+                if (longFormat) return 'line-long-format';
+                return 'line';
+            }
+            if (intent && intent.preferred_chart === 'pie') return 'pie';
+            if (intent && intent.preferred_chart === 'bar') return 'bar';
+            if (longFormat) return 'line-long-format';
+            const columnNames = columns.join(' ').toLowerCase();
+            if (columnNames.match(/trend|趋势|time|时间|date|日期|month|月|year|年|day|天|hour|小时/)) {
+                const firstVal = resultData[0]?.[xColumn];
+                if (firstVal && (firstVal.toString().match(/\d{4}[-/]\d{1,2}[-/]\d{1,2}/) || firstVal.toString().match(/\d{4}[-/]\d{1,2}/) || firstVal.toString().match(/\d{8}/))) return 'line';
+            }
+            if (columnNames.match(/percent|百分比|占比|比例|rate|率|proportion|份额|distribution|分布/) && yColumns.length === 1 && resultData.length <= 10) return 'pie';
+            if (yColumns.length === 1) {
+                const yData = resultData.map(row => Number(row[yColumns[0]]) || 0);
+                const total = yData.reduce((a, b) => a + b, 0);
+                if (total >= 95 && total <= 105 && resultData.length <= 8) return 'pie';
+                if (resultData.length > 15) return 'line';
+            }
+            if (yColumns.length > 1 && resultData.length > 5) return 'line';
+            return 'bar';
+        }
+
+        function smartGenerateChart(resultData, columns, intent = null) {
+            const columnTypes = detectColumnTypes(resultData, columns);
+            const chartType = detectChartType(resultData, columns, columnTypes, intent);
+            if (chartType === 'line-long-format') {
+                const longFormat = isLongFormatTimeSeries(resultData, columns);
+                if (longFormat) {
+                    const transformed = transformLongToWide(resultData, longFormat.dateCol, longFormat.categoryCol, longFormat.valueCol);
+                    const formattedData = transformed.data.map(row => {
+                        const newRow = {...row};
+                        newRow[longFormat.dateCol] = formatDate(row[longFormat.dateCol]);
+                        return newRow;
+                    });
+                    return generateLineChart(formattedData, transformed.columns, transformed.columns[0], transformed.columns.slice(1), formattedData.map(row => row[transformed.columns[0]]));
+                }
+            }
+            const xColumn = columns[0];
+            let yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
+            if (yColumns.length === 0) yColumns = columns.slice(1);
+            const xAxisData = resultData.map(row => {
+                let val = row[xColumn];
+                if (val && val.toString().match(/^\d{8}$/)) val = formatDate(val);
+                if (val && typeof val === 'string' && val.length > 20) return val.substring(0, 20) + '...';
+                return val !== null ? String(val) : '';
+            });
+            if (chartType === 'pie') return generatePieChart(resultData, columns, xColumn, yColumns);
+            else if (chartType === 'line') return generateLineChart(resultData, columns, xColumn, yColumns, xAxisData);
+            else return generateBarChart(resultData, columns, xColumn, yColumns, xAxisData);
+        }
+
+        function generateBarChart(resultData, columns, xColumn, yColumns, xAxisData) {
+            const series = yColumns.map((col, idx) => {
+                const data = resultData.map(row => row[col] !== null ? Number(row[col]) : 0);
+                const colors = [['#15a8a8', '#0e8a8a'], ['#00d4ff', '#0099cc'], ['#fe5d26', '#cc4a1e'], ['#7c3aed', '#5b21b6'], ['#bf1363', '#8b0a46']];
+                const colorPair = colors[idx % colors.length];
+                return {
+                    name: col, type: 'bar', data: data,
+                    itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: colorPair[0] }, { offset: 1, color: colorPair[1] }]), borderRadius: [8, 8, 0, 0] },
+                    label: { show: resultData.length < 20, position: 'top', color: '#64748b', fontSize: 11 }
+                };
+            });
+            return {
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'axis', backgroundColor: 'rgba(30, 41, 59, 0.95)', textStyle: { color: '#fff' } },
+                grid: { left: '80px', right: '40px', top: '60px', bottom: '100px', containLabel: true },
+                xAxis: { type: 'category', data: xAxisData, axisLabel: { color: '#64748b', rotate: resultData.length > 10 ? 45 : 0 } },
+                yAxis: { type: 'value', axisLabel: { color: '#64748b' }, splitLine: { lineStyle: { type: 'dashed' } } },
+                series: series,
+                legend: { show: yColumns.length > 1, top: 10 }
+            };
+        }
+
+        function generateLineChart(resultData, columns, xColumn, yColumns, xAxisData) {
+             const techColors = ['#15a8a8', '#00d4ff', '#fe5d26', '#7c3aed', '#bf1363'];
+             const series = yColumns.map((col, idx) => {
+                 const data = resultData.map(row => row[col] !== null ? Number(row[col]) : 0);
+                 const color = techColors[idx % techColors.length];
+                 return {
+                     name: col, type: 'line', data: data, smooth: true,
+                     itemStyle: { color: color }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: color + '40' }, { offset: 1, color: color + '08' }]) }
+                 };
+             });
+             return {
+                 backgroundColor: 'transparent',
+                 tooltip: { trigger: 'axis', backgroundColor: 'rgba(30, 41, 59, 0.95)', textStyle: { color: '#fff' } },
+                 grid: { left: '80px', right: '40px', top: '60px', bottom: '100px', containLabel: true },
+                 xAxis: { type: 'category', data: xAxisData, boundaryGap: false, axisLabel: { color: '#64748b', rotate: resultData.length > 15 ? 45 : 0 } },
+                 yAxis: { type: 'value', axisLabel: { color: '#64748b' }, splitLine: { lineStyle: { type: 'dashed' } } },
+                 series: series,
+                 legend: { show: yColumns.length > 1, top: 10 }
+             };
+        }
+
+        function generatePieChart(resultData, columns, xColumn, yColumns) {
+            const techColors = ['#15a8a8', '#00d4ff', '#fe5d26', '#7c3aed', '#bf1363', '#fbbf24', '#10b981', '#f59e0b'];
+            const pieData = resultData.map((row, idx) => ({
+                name: String(row[xColumn]), value: Number(row[yColumns[0]]) || 0,
+                itemStyle: { color: techColors[idx % techColors.length], borderRadius: 10, borderColor: '#fff', borderWidth: 2 }
+            }));
+            return {
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+                series: [{
+                    name: yColumns[0], type: 'pie', radius: ['45%', '75%'], center: ['40%', '50%'], data: pieData,
+                    label: { show: true, formatter: '{d}%' }
+                }],
+                legend: { show: true, orient: 'vertical', right: 20, top: 'center' }
+            };
+        }
+        
+        async function loadKnowledgeBase() {
+             const tbody = document.querySelector('#kbTable tbody');
+             tbody.innerHTML = '<tr><td colspan="5" class="text-center p-5"><div class="spinner-border text-primary" role="status"></div><div class="mt-2 text-muted small">Loading training data...</div></td></tr>';
+             try {
+                const res = await fetch('/api/v0/get_training_data');
+                const data = await res.json();
+                KB_DATA = data || [];
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-5">No training data found.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.map(item => {
+                    let badgeClass = 'type-doc';
+                    if (item.training_data_type === 'ddl') badgeClass = 'type-ddl';
+                    if (item.training_data_type === 'sql') badgeClass = 'type-sql';
+                    const content = item.content || '';
+                    return `<tr><td><input class="form-check-input kb-checkbox" type="checkbox" value="${item.id}" onchange="updateBatchDeleteBtn()"></td><td><span class="badge ${badgeClass} type-badge">${item.training_data_type}</span></td><td><div class="content-cell">${content}</div></td><td><div class="text-truncate" style="max-width: 200px;">${item.question || '-'}</div></td><td class="text-center"><button class="btn btn-sm btn-light border me-1" onclick="editData('${item.id}')"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-light border text-danger" onclick="deleteData('${item.id}')"><i class="bi bi-trash"></i></button></td></tr>`;
+                }).join('');
+             } catch(e) { tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger p-4">Error: ${e.message}</td></tr>`; }
+        }
+
+        const addModal = new bootstrap.Modal(document.getElementById('addModal'));
+        let currentEditId = null;
+
+        function showAddModal() {
+            currentEditId = null;
+            document.querySelector('.modal-title').innerText = 'Add Training Data';
+            document.getElementById('addType').value = 'documentation';
+            document.getElementById('addType').disabled = false;
+            document.getElementById('addQuestion').value = '';
+            document.getElementById('addContent').value = '';
+            toggleAddFields();
+            addModal.show();
+        }
+
+        function editData(id) {
+            const item = KB_DATA.find(d => d.id === id);
+            if (!item) {
+                alert('Error: Data not found');
+                return;
+            }
+            currentEditId = item.id;
+            document.querySelector('.modal-title').innerText = 'Edit Training Data';
+            let typeVal = 'documentation';
+            if (item.training_data_type === 'ddl') typeVal = 'ddl';
+            if (item.training_data_type === 'sql') typeVal = 'sql';
+            document.getElementById('addType').value = typeVal;
+            document.getElementById('addType').disabled = true;
+            document.getElementById('addQuestion').value = item.question || '';
+            document.getElementById('addContent').value = item.content || '';
+            toggleAddFields();
+            addModal.show();
+        }
+
+        function hideAddModal() {
+            addModal.hide();
+            currentEditId = null;
+        }
+
+        function toggleAddFields() {
+            const type = document.getElementById('addType').value;
+            const qGroup = document.getElementById('questionGroup');
+            const cLabel = document.getElementById('contentLabel');
+            if (type === 'sql') {
+                qGroup.style.display = 'block';
+                cLabel.innerText = 'SQL QUERY';
+            } else if (type === 'ddl') {
+                qGroup.style.display = 'none';
+                cLabel.innerText = 'DDL STATEMENT';
+            } else {
+                qGroup.style.display = 'none';
+                cLabel.innerText = 'DOCUMENTATION TEXT';
+            }
+        }
+
+        async function submitData() {
+            const type = document.getElementById('addType').value;
+            const content = document.getElementById('addContent').value.trim();
+            const question = document.getElementById('addQuestion').value.trim();
+            if (!content) { alert('Content is required'); return; }
+            if (type === 'sql' && !question) { alert('Question is required for SQL type'); return; }
+            try {
+                if (currentEditId) {
+                    const delRes = await fetch(`/api/v0/training_data/${currentEditId}`, { method: 'DELETE' });
+                    if (!delRes.ok) throw new Error('Failed to update');
+                }
+                const res = await fetch('/api/v0/training_data', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type, content, question}) });
+                if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Failed to save data'); }
+                hideAddModal();
+                loadKnowledgeBase();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function submitFeedback(msgId, type, btnElement) {
+            const data = CHAT_HISTORY[msgId];
+            if (!data) return;
+            const parent = btnElement.parentElement;
+            const buttons = parent.querySelectorAll('.feedback-btn');
+            buttons.forEach(b => {
+                b.classList.remove('active-up', 'active-down');
+                b.disabled = true;
+            });
+            if (type === 'up') btnElement.classList.add('active-up');
+            if (type === 'down') btnElement.classList.add('active-down');
+            try {
+                await fetch('/api/v0/feedback', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ question: data.question, sql: data.sql, explanation: data.explanation, feedback_type: type }) });
+                if (type === 'down') alert('Thanks for your feedback! We will improve the model.');
+            } catch (e) {
+                console.error('Feedback error', e);
+                buttons.forEach(b => b.disabled = false);
+            }
+        }
+
+        async function deleteData(id) {
+            if (!confirm('Are you sure you want to delete this training data?')) return;
+            try {
+                const res = await fetch(`/api/v0/training_data/${id}`, { method: 'DELETE' });
+                if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Failed to delete data'); }
+                loadKnowledgeBase();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        function updateBatchDeleteBtn() {
+            const len = document.querySelectorAll('.kb-checkbox:checked').length;
+            const btn = document.getElementById('batchDeleteBtn');
+            btn.style.display = len > 0 ? 'inline-block' : 'none';
+            btn.innerHTML = `<i class="bi bi-trash me-1"></i>Delete (${len})`;
+        }
+        function toggleSelectAll() {
+            const chk = document.getElementById('selectAllKb').checked;
+            document.querySelectorAll('.kb-checkbox').forEach(cb => cb.checked = chk);
+            updateBatchDeleteBtn();
+        }
+        async function batchDelete() {
+            const ids = Array.from(document.querySelectorAll('.kb-checkbox:checked')).map(cb => cb.value);
+            if(ids.length === 0 || !confirm(`Delete ${ids.length} items?`)) return;
+            try {
+                await fetch('/api/v0/training_data/batch_delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ids})});
+                loadKnowledgeBase();
+                document.getElementById('selectAllKb').checked = false;
+            } catch(e) { alert(e.message); }
+        }
+        
+        function downloadChart(msgId, format) {
+             const chartInfo = CHART_INSTANCES[msgId];
+             if (!chartInfo) return;
+             if (chartInfo.type === 'plotly') {
+                 Plotly.toImage(chartInfo.chart, { format }).then(dataUrl => {
+                     const link = document.createElement('a');
+                     link.download = `chart.${format}`;
+                     link.href = dataUrl;
+                     link.click();
+                 });
+                 return;
+             }
+             if (chartInfo.type === 'echarts') {
+                 const link = document.createElement('a');
+                 link.download = `chart.${format}`;
+                 link.href = chartInfo.chart.getDataURL({type: format, backgroundColor: '#fff'});
+                 link.click();
+             }
+        }
+        function toggleFullscreen(id) {
+             const el = document.getElementById(id);
+             document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen();
+        }
+    </script>
+</body>
+</html>
