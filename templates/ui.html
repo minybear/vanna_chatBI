@@ -633,7 +633,9 @@
                         </div>
                     `;
                     
-                    if ((result && result.length > 0 && columns && columns.length > 0) || runData?.chart) {
+                    // 【关键修复】如果是明细意图，不显示图表区域
+                    const isDetailIntent = runData?.intent?.intent === 'detail';
+                    if (!isDetailIntent && ((result && result.length > 0 && columns && columns.length > 0) || runData?.chart)) {
                         try {
                             const chartCard = document.getElementById(`chart-card-${msgId}`);
                             const chartContainer = document.getElementById(`chart-container-${msgId}`);
@@ -651,6 +653,11 @@
                         } catch (e) {
                             console.error("Chart render error", e);
                         }
+                    } else if (isDetailIntent) {
+                        // 明细意图，隐藏图表区域
+                        const chartCard = document.getElementById(`chart-card-${msgId}`);
+                        if (chartCard) chartCard.style.display = 'none';
+                        console.log('[DEBUG] 明细意图，不显示图表');
                     }
 
                 } else {
@@ -795,7 +802,9 @@
             chatBox.appendChild(div);
             chatBox.scrollTop = chatBox.scrollHeight;
 
-            if ((safeResult.length > 0 && safeColumns.length > 0) || chart) {
+            // 【关键修复】如果是明细意图，不显示图表区域
+            const isDetailIntent = intent?.intent === 'detail';
+            if (!isDetailIntent && ((safeResult.length > 0 && safeColumns.length > 0) || chart)) {
                 try {
                     const chartCard = document.getElementById(`chart-card-${msgId}`);
                     const chartContainer = document.getElementById(`chart-container-${msgId}`);
@@ -813,6 +822,11 @@
                 } catch (e) {
                     console.error("Chart render error", e);
                 }
+            } else if (isDetailIntent) {
+                // 明细意图，隐藏图表区域
+                const chartCard = document.getElementById(`chart-card-${msgId}`);
+                if (chartCard) chartCard.style.display = 'none';
+                console.log('[DEBUG] 明细意图（历史记录），不显示图表');
             }
         }
 

@@ -325,24 +325,34 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
         time_grain = ""
         agg_hint = ""
 
-        trend_keywords = ["趋势", "变化", "走势", "曲线", "时间", "最近", "过去", "按日", "按月", "按周", "按小时", "同比", "环比"]
+        # 关键词优先级调整：明细优先级最高
+        detail_keywords = ["明细", "详情", "列表", "详细信息", "明细数据", "数据明细"]
+        trend_keywords = ["趋势", "变化", "走势", "曲线", "按日", "按月", "按周", "按小时", "同比", "环比"]
         distribution_keywords = ["分布", "占比", "比例", "构成", "份额"]
-        compare_keywords = ["对比", "比较", "差异", "同比", "环比"]
-        detail_keywords = ["明细", "详情", "列表", "记录", "明细数据", "数据明细", "top", "排行"]
+        compare_keywords = ["对比", "比较", "差异"]
+        ranking_keywords = ["top", "排行", "排名", "前几"]
 
-        if any(k in q for k in trend_keywords):
+        # 【优先级1】明细数据 - 必须优先判断
+        if any(k in q for k in detail_keywords):
+            intent = "detail"
+            preferred_chart = "table"
+        # 【优先级2】排行数据
+        elif any(k in q for k in ranking_keywords):
+            intent = "ranking"
+            preferred_chart = "bar"
+        # 【优先级3】趋势分析
+        elif any(k in q for k in trend_keywords):
             intent = "trend"
             preferred_chart = "line"
             agg_hint = "sum"
+        # 【优先级4】分布占比
         elif any(k in q for k in distribution_keywords):
             intent = "distribution"
             preferred_chart = "pie"
+        # 【优先级5】对比分析
         elif any(k in q for k in compare_keywords):
             intent = "comparison"
             preferred_chart = "bar"
-        elif any(k in q for k in detail_keywords):
-            intent = "detail"
-            preferred_chart = "table"
 
         if "按日" in q or "每日" in q or "日" in q:
             time_grain = "day"
@@ -371,39 +381,47 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
         
         question_lower = question.lower()
         
-        # 单值场景
+        # 【优先级1】明细数据场景 - 不画图，返回 None
+        # 强匹配：如果问题中包含"明细"或"详情"，一定不画图
+        strong_detail_keywords = ['明细', '详情', '列表', '详细信息', 'detail', 'list', 'records']
+        if any(kw in question_lower for kw in strong_detail_keywords):
+            print(f"[DEBUG] 检测到明细关键词，不生成图表")
+            return None  # 明细数据不应该画图
+        
+        # 【优先级2】单值场景
         if row_count == 1 and len(numeric_cols) == 1:
             return "Indicator (go.Indicator) - 单一指标卡片"
         
-        # 时间序列场景
-        if datetime_cols or any(kw in question_lower for kw in ['趋势', '变化', '时间', 'trend', 'time', '走势', '按日', '按月']):
-            return "Line Chart (px.line) - 时间序列折线图"
+        # 【优先级3】排行场景（优先于趋势判断）
+        if any(kw in question_lower for kw in ['top', 'rank', '排名', '排行', '前', '最']):
+            return "Bar Chart (px.bar) - 横向柱状图（水平）"
         
-        # 占比/分布场景
+        # 【优先级4】占比/分布场景
         if any(kw in question_lower for kw in ['占比', '比例', '分布', 'proportion', 'distribution', '构成']):
             if len(categorical_cols) >= 1 and df[categorical_cols[0]].nunique() <= 8:
                 return "Pie Chart (px.pie) - 饼图"
             else:
                 return "Bar Chart (px.bar) - 柱状图"
         
-        # 对比场景
+        # 【优先级5】时间序列场景（趋势分析）
+        trend_keywords = ['趋势', '变化', '走势', '曲线', 'trend', '按日', '按月', '按周']
+        if datetime_cols or any(kw in question_lower for kw in trend_keywords):
+            return "Line Chart (px.line) - 时间序列折线图"
+        
+        # 【优先级6】对比场景
         if any(kw in question_lower for kw in ['对比', '比较', 'compare', 'vs']):
             return "Bar Chart (px.bar) - 分组柱状图"
         
-        # 排行场景
-        if any(kw in question_lower for kw in ['top', 'rank', '排名', '排行']):
-            return "Bar Chart (px.bar) - 横向柱状图（水平）"
-        
-        # 默认推荐
+        # 【默认】根据数据结构推荐
         if len(numeric_cols) >= 2:
             return "Scatter Plot (px.scatter) - 散点图"
         elif len(numeric_cols) == 1 and len(categorical_cols) >= 1:
             return "Bar Chart (px.bar) - 柱状图"
         else:
-            return "Table - 建议使用表格展示"
+            return None  # 无合适图表，返回表格
 
     def generate_plotly_code(
-        self, question: str = None, sql: str = None, df: pd.DataFrame = None, **kwargs
+        self, question: str = None, sql: str = None, df: pd.DataFrame = None, chart_recommendation: str = None, **kwargs
     ) -> str:
         """
         优化版可视化代码生成，传递真实数据样本给LLM
@@ -412,10 +430,16 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
             question: 用户原始问题
             sql: 生成的SQL查询
             df: 查询结果DataFrame（真实数据）
+            chart_recommendation: 外部传入的图表推荐（如果为None则表示不需要图表）
             **kwargs: 其他参数
         """
         if df is None:
             raise ValueError("DataFrame cannot be None for visualization generation")
+        
+        # 【关键】如果外部传入 chart_recommendation=None，说明是明细数据，直接返回 None
+        if chart_recommendation is None:
+            print(f"[DEBUG] 明细数据场景（外部传入），不生成可视化代码")
+            return None
         
         # 检测用户问题的语言
         user_lang = self.detect_language(question) if question else 'zh'
@@ -443,8 +467,13 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
             except Exception:
                 pass
         
-        # 2. 智能图表推荐
-        chart_recommendation = self._recommend_chart_type(df, question or "")
+        # 2. 如果没有传入推荐，则调用内部推荐逻辑
+        if not chart_recommendation:
+            chart_recommendation = self._recommend_chart_type(df, question or "")
+            # 【关键】如果推荐结果是 None，说明是明细数据，不应该生成图表
+            if chart_recommendation is None:
+                print(f"[DEBUG] 明细数据场景（内部检测），不生成可视化代码")
+                return None  # 返回 None，不生成图表
         
         # 3. 构建提示词
         if user_lang == 'zh':
@@ -953,23 +982,48 @@ def run_query_and_chart(sql: str, question: Optional[str] = None):
             except Exception as e:
                 print(f"[DEBUG] 列 '{col}' 无法转换为 datetime: {e}")
     
-    # 4. 先生成图表（使用原始数据类型，包括 datetime）
+    # 4. 先进行意图检测，判断是否需要生成图表
     chart_json = None
     if question:
         try:
-            # 打印 DataFrame 信息用于调试
-            print(f"\n[DEBUG] ===== DataFrame 信息 =====")
-            print(f"[DEBUG] 列名: {df.columns.tolist()}")
-            print(f"[DEBUG] 数据类型:\n{df.dtypes}")
-            print(f"[DEBUG] 数据预览:\n{df.head()}")
-            print(f"[DEBUG] 数据值:\n{df.to_dict('records')}")
-            print(f"[DEBUG] ========================\n")
+            # 意图检测
+            intent = vn.detect_intent(question)
+            print(f"[DEBUG] 问题意图: {intent}")
             
-            plotly_code = vn.generate_plotly_code(question=question, sql=sql, df=df)
-            print(f"[DEBUG] 生成的 Plotly 代码:\n{plotly_code}\n")
-            fig = vn.get_plotly_figure(plotly_code=plotly_code, df=df)
-            if fig:
-                chart_json = fig.to_json()
+            # 如果意图是明细数据，直接跳过图表生成
+            if intent.get('intent') == 'detail':
+                print(f"[DEBUG] 明细数据场景，跳过图表生成")
+            else:
+                # 打印 DataFrame 信息用于调试
+                print(f"\n[DEBUG] ===== DataFrame 信息 =====")
+                print(f"[DEBUG] 列名: {df.columns.tolist()}")
+                print(f"[DEBUG] 数据类型:\n{df.dtypes}")
+                print(f"[DEBUG] 数据预览:\n{df.head()}")
+                print(f"[DEBUG] 数据值:\n{df.to_dict('records')}")
+                print(f"[DEBUG] ========================\n")
+                
+                # 先推荐图表类型
+                chart_recommendation = vn._recommend_chart_type(df, question)
+                
+                # 如果推荐为 None（明细数据），不生成图表
+                if chart_recommendation is None:
+                    print(f"[DEBUG] 图表推荐为 None，不生成图表")
+                else:
+                    plotly_code = vn.generate_plotly_code(
+                        question=question, 
+                        sql=sql, 
+                        df=df,
+                        chart_recommendation=chart_recommendation
+                    )
+                    
+                    # 如果返回 None，说明是明细数据，不生成图表
+                    if plotly_code is None:
+                        print(f"[DEBUG] 明细数据不生成图表，只返回表格")
+                    else:
+                        print(f"[DEBUG] 生成的 Plotly 代码:\n{plotly_code}\n")
+                        fig = vn.get_plotly_figure(plotly_code=plotly_code, df=df)
+                        if fig:
+                            chart_json = fig.to_json()
         except Exception as e:
             print(f"可视化生成失败: {e}")
             import traceback
