@@ -4,12 +4,14 @@ import time
 import json
 import uuid
 import requests
-from datetime import datetime
+import secrets
+import jwt
+from datetime import datetime, timedelta
 from decimal import Decimal
 from vanna.legacy.openai import OpenAI_Chat
 from vanna.legacy.chromadb import ChromaDB_VectorStore
 from vanna.legacy.ZhipuAI.ZhipuAI_embeddings import ZhipuAIEmbeddingFunction
-from fastapi import FastAPI, Response, Body, HTTPException
+from fastapi import FastAPI, Response, Body, HTTPException, Depends, Header
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -18,7 +20,7 @@ from dotenv import load_dotenv
 import pandas as pd
 from pydantic import BaseModel
 from openai import OpenAI
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 # Load environment variables
 load_dotenv()
@@ -32,7 +34,173 @@ print(f"  - LARK_WEBHOOK_URL: {'已设置 ✅' if os.getenv('LARK_WEBHOOK_URL') 
 if os.getenv('LARK_WEBHOOK_URL'):
     webhook_url = os.getenv('LARK_WEBHOOK_URL')
     print(f"  - Webhook URL (前40字符): {webhook_url[:40]}...")
+# 调试 SHOW_SQL_DEBUG
+show_sql_raw = os.getenv('SHOW_SQL_DEBUG', '未设置')
+print(f"  - SHOW_SQL_DEBUG: '{show_sql_raw}' (类型: {type(show_sql_raw).__name__}, 长度: {len(show_sql_raw)})")
 print("="*60)
+
+# === Auth & Tenant Isolation Config ===
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() == "true"
+AUTH_USERS_JSON = os.getenv("AUTH_USERS_JSON", "")
+AUTH_TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL_SECONDS", "86400"))
+# JWT 密钥，生产环境务必通过环境变量设置一个强随机字符串
+JWT_SECRET = os.getenv("JWT_SECRET", "chatbi-default-secret-change-in-production")
+JWT_ALGORITHM = "HS256"
+
+TENANT_ISOLATION_ENABLED = os.getenv("ENABLE_TENANT_ISOLATION", "false").lower() == "true"
+TENANT_COLUMN = os.getenv("TENANT_COLUMN", "operator_id")
+
+_AUTH_USERS_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+def _load_auth_users() -> Dict[str, Dict[str, Any]]:
+    if not AUTH_USERS_JSON:
+        return {}
+    try:
+        raw = json.loads(AUTH_USERS_JSON)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"AUTH_USERS_JSON 解析失败: {exc}") from exc
+
+    users: Dict[str, Dict[str, Any]] = {}
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, dict):
+        items = list(raw.values())
+    else:
+        raise ValueError("AUTH_USERS_JSON 必须是数组或对象")
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        username = str(item.get("username", "")).strip()
+        password = str(item.get("password", "")).strip()
+        operator_id = str(item.get("operator_id", "")).strip()
+        if not username or not password or not operator_id:
+            raise ValueError("AUTH_USERS_JSON 中每个用户必须包含 username/password/operator_id")
+        users[username] = {
+            "username": username,
+            "password": password,
+            "operator_id": operator_id,
+        }
+    return users
+
+
+def _get_auth_users() -> Dict[str, Dict[str, Any]]:
+    global _AUTH_USERS_CACHE
+    if _AUTH_USERS_CACHE is None:
+        _AUTH_USERS_CACHE = _load_auth_users()
+    return _AUTH_USERS_CACHE
+
+
+def _authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
+    users = _get_auth_users()
+    user = users.get(username)
+    if not user:
+        return None
+    if secrets.compare_digest(user.get("password", ""), password):
+        return {
+            "username": user["username"],
+            "operator_id": user["operator_id"],
+        }
+    return None
+
+
+def _issue_token(user: Dict[str, Any]) -> str:
+    """生成 JWT token，包含用户信息和过期时间"""
+    payload = {
+        "username": user["username"],
+        "operator_id": user["operator_id"],
+        "exp": datetime.utcnow() + timedelta(seconds=AUTH_TOKEN_TTL_SECONDS),
+        "iat": datetime.utcnow(),
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return token
+
+
+def _parse_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    parts = authorization.strip().split(" ", 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip()
+    return None
+
+
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    x_auth_token: Optional[str] = Header(None),
+) -> Dict[str, Any]:
+    if not AUTH_ENABLED:
+        return {"username": "anonymous", "operator_id": ""}
+
+    token = x_auth_token or _parse_bearer_token(authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail="未登录或缺少访问令牌")
+
+    try:
+        # JWT 无状态验证，不依赖服务器内存
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return {
+            "username": payload.get("username"),
+            "operator_id": payload.get("operator_id"),
+        }
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="访问令牌已过期")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="访问令牌无效")
+
+
+def _has_tenant_filter(sql: str, tenant_column: str, operator_id: str) -> bool:
+    if not sql:
+        return False
+    pattern = rf"\b{re.escape(tenant_column)}\b\s*=\s*'{re.escape(operator_id)}'"
+    return re.search(pattern, sql, re.IGNORECASE) is not None
+
+
+def _inject_tenant_filter(sql: str, tenant_column: str, operator_id: str) -> str:
+    sql_stripped = sql.strip()
+    if not sql_stripped:
+        return sql_stripped
+
+    has_semicolon = sql_stripped.endswith(";")
+    if has_semicolon:
+        sql_stripped = sql_stripped[:-1].rstrip()
+
+    sql_upper = sql_stripped.upper()
+    if "WHERE" in sql_upper:
+        replaced = re.sub(
+            r"\bWHERE\b",
+            f"WHERE {tenant_column} = '{operator_id}' AND ",
+            sql_stripped,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        return f"{replaced};" if has_semicolon else replaced
+
+    insert_pos = len(sql_stripped)
+    for keyword in [" GROUP BY", " ORDER BY", " LIMIT", " HAVING", " UNION ", " INTERSECT ", " EXCEPT "]:
+        pos = sql_upper.find(keyword)
+        if pos != -1 and pos < insert_pos:
+            insert_pos = pos
+
+    if insert_pos == len(sql_stripped):
+        injected = f"{sql_stripped} WHERE {tenant_column} = '{operator_id}'"
+    else:
+        before = sql_stripped[:insert_pos].rstrip()
+        after = sql_stripped[insert_pos:]
+        injected = f"{before} WHERE {tenant_column} = '{operator_id}' {after.lstrip()}"
+
+    return f"{injected};" if has_semicolon else injected
+
+
+def transform_sql_with_tenant(sql: str, operator_id: str) -> str:
+    if not TENANT_ISOLATION_ENABLED:
+        return sql
+    if not operator_id:
+        raise ValueError("租户隔离已启用，但 operator_id 为空")
+    if _has_tenant_filter(sql, TENANT_COLUMN, operator_id):
+        return sql
+    return _inject_tenant_filter(sql, TENANT_COLUMN, operator_id)
 
 # 对话历史管理（ChromaDB 持久化存储）
 class SimpleEmbeddingFunction:
@@ -52,7 +220,7 @@ class SimpleEmbeddingFunction:
 
 
 class ChromaConversationHistory:
-    """使用 ChromaDB 持久化保存会话与消息"""
+    """使用 ChromaDB 持久化保存会话与消息，支持 operator_id 租户隔离"""
     def __init__(self, chroma_client, max_history_per_session=10):
         self.max_history = max_history_per_session
         self.embedding_function = SimpleEmbeddingFunction()
@@ -78,10 +246,11 @@ class ChromaConversationHistory:
                 "created_at": meta.get("created_at"),
                 "updated_at": meta.get("updated_at"),
                 "message_count": meta.get("message_count", 0),
+                "operator_id": meta.get("operator_id", ""),
             }
         return None
 
-    def _upsert_session(self, session_id: str, title: str, created_at: str, updated_at: str, message_count: int):
+    def _upsert_session(self, session_id: str, title: str, created_at: str, updated_at: str, message_count: int, operator_id: str = ""):
         self.sessions.upsert(
             ids=[session_id],
             documents=[title],
@@ -90,11 +259,12 @@ class ChromaConversationHistory:
                 "created_at": created_at,
                 "updated_at": updated_at,
                 "message_count": message_count,
+                "operator_id": operator_id,
             }],
         )
 
-    def add_message(self, session_id: str, role: str, content: str, data: Optional[Dict] = None):
-        """添加一条消息到会话历史"""
+    def add_message(self, session_id: str, role: str, content: str, data: Optional[Dict] = None, operator_id: str = ""):
+        """添加一条消息到会话历史（带租户隔离）"""
         now = self._now()
         def _sanitize_for_json(value):
             try:
@@ -144,6 +314,7 @@ class ChromaConversationHistory:
                 "session_id": session_id,
                 "timestamp": now,
                 "role": role,
+                "operator_id": operator_id,  # 添加租户标识
             }],
         )
 
@@ -152,19 +323,30 @@ class ChromaConversationHistory:
             created_at = now
             message_count = 0
             title = f"Session {session_id[:8]}"
+            session_operator_id = operator_id
         else:
             created_at = session_record.get("created_at") or now
             message_count = session_record.get("message_count", 0)
             title = session_record.get("title") or f"Session {session_id[:8]}"
+            # 保留原有的 operator_id，如果没有则使用传入的
+            session_operator_id = session_record.get("operator_id") or operator_id
 
         message_count += 1
         if role == "user" and message_count == 1:
             title = content[:30] + ("..." if len(content) > 30 else "")
 
-        self._upsert_session(session_id, title, created_at, now, message_count)
+        self._upsert_session(session_id, title, created_at, now, message_count, session_operator_id)
 
-    def get_history(self, session_id: str, limit: Optional[int] = None) -> List[Dict]:
-        """获取指定会话的历史记录"""
+    def get_history(self, session_id: str, limit: Optional[int] = None, operator_id: str = "") -> List[Dict]:
+        """获取指定会话的历史记录（带租户隔离验证）"""
+        # 先验证会话归属
+        session_record = self._get_session_record(session_id)
+        if session_record and operator_id:
+            session_owner = session_record.get("operator_id", "")
+            if session_owner and session_owner != operator_id:
+                print(f"[DEBUG] 会话 {session_id} 属于 {session_owner}，当前用户 {operator_id} 无权访问")
+                return []  # 无权访问其他用户的会话
+        
         data = self.messages.get(where={"session_id": session_id})
         if not data or not data.get("ids"):
             return []
@@ -189,17 +371,31 @@ class ChromaConversationHistory:
             messages = messages[-limit:]
         return messages
 
-    def get_context_history(self, session_id: str) -> List[Dict]:
-        return self.get_history(session_id, limit=self.max_history)
+    def get_context_history(self, session_id: str, operator_id: str = "") -> List[Dict]:
+        return self.get_history(session_id, limit=self.max_history, operator_id=operator_id)
 
-    def clear_session(self, session_id: str):
-        """清除指定会话的历史"""
+    def clear_session(self, session_id: str, operator_id: str = "") -> bool:
+        """清除指定会话的历史（带租户隔离验证）"""
+        # 先验证会话归属
+        session_record = self._get_session_record(session_id)
+        if session_record and operator_id:
+            session_owner = session_record.get("operator_id", "")
+            if session_owner and session_owner != operator_id:
+                print(f"[DEBUG] 会话 {session_id} 属于 {session_owner}，当前用户 {operator_id} 无权删除")
+                return False  # 无权删除其他用户的会话
+        
         self.messages.delete(where={"session_id": session_id})
         self.sessions.delete(ids=[session_id])
+        return True
 
-    def get_sessions(self) -> List[Dict]:
-        """Get list of active sessions with metadata"""
-        data = self.sessions.get()
+    def get_sessions(self, operator_id: str = "") -> List[Dict]:
+        """获取用户的会话列表（按 operator_id 过滤）"""
+        # 如果提供了 operator_id，只返回该用户的会话
+        if operator_id:
+            data = self.sessions.get(where={"operator_id": operator_id})
+        else:
+            data = self.sessions.get()
+        
         if not data or not data.get("ids"):
             return []
 
@@ -219,15 +415,25 @@ class ChromaConversationHistory:
 
         return sorted(sessions_list, key=lambda x: x.get("updated_at") or "", reverse=True)
 
-    def rename_session(self, session_id: str, new_title: str):
+    def rename_session(self, session_id: str, new_title: str, operator_id: str = "") -> bool:
+        """重命名会话（带租户隔离验证）"""
         session_record = self._get_session_record(session_id)
         if session_record is None:
             return False
+        
+        # 验证会话归属
+        if operator_id:
+            session_owner = session_record.get("operator_id", "")
+            if session_owner and session_owner != operator_id:
+                print(f"[DEBUG] 会话 {session_id} 属于 {session_owner}，当前用户 {operator_id} 无权重命名")
+                return False  # 无权重命名其他用户的会话
+        
         created_at = session_record.get("created_at") or self._now()
         updated_at = self._now()
         message_count = session_record.get("message_count", 0)
         title = new_title or session_record.get("title") or f"Session {session_id}"
-        self._upsert_session(session_id, title, created_at, updated_at, message_count)
+        session_operator_id = session_record.get("operator_id") or operator_id
+        self._upsert_session(session_id, title, created_at, updated_at, message_count, session_operator_id)
         return True
 
 class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
@@ -669,7 +875,15 @@ Generate code now (code only, no explanations):
         else:
             return 'en'
 
-    def generate_sql_optimized(self, question: str, allow_llm_to_see_data=False, conversation_history: Optional[List[Dict]] = None, intent: Optional[Dict] = None, **kwargs):
+    def generate_sql_optimized(
+        self,
+        question: str,
+        allow_llm_to_see_data=False,
+        conversation_history: Optional[List[Dict]] = None,
+        intent: Optional[Dict] = None,
+        operator_id: Optional[str] = None,
+        **kwargs,
+    ):
         """
         Optimized version of generate_sql that returns both SQL and Explanation in a single pass.
         支持对话历史上下文。
@@ -847,7 +1061,7 @@ Generate code now (code only, no explanations):
             # This is the slow path, but necessary for correctness if hit.
             intermediate_sql = self.extract_sql(llm_response)
             try:
-                df = self.run_sql(intermediate_sql)
+                df = self.run_sql(intermediate_sql, operator_id=operator_id)
                 # Re-prompt with data (根据语言切换提示文本)
                 message_log.append(self.assistant_message(llm_response))
                 if user_lang == 'zh':
@@ -871,6 +1085,11 @@ Generate code now (code only, no explanations):
 
     def run_sql(self, sql: str, **kwargs):
         # Custom SQL Runner to handle SSL and Multi-DB
+        operator_id = kwargs.get("operator_id")
+        try:
+            sql = transform_sql_with_tenant(sql, operator_id)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
         db_config = {
             'user': os.getenv('DB_USER'),
@@ -942,8 +1161,12 @@ conversation_history = ChromaConversationHistory(
     max_history_per_session=10
 )
 
-def run_query_and_chart(sql: str, question: Optional[str] = None):
-    df = vn.run_sql(sql=sql)
+def run_query_and_chart(
+    sql: str,
+    question: Optional[str] = None,
+    operator_id: Optional[str] = None,
+):
+    df = vn.run_sql(sql=sql, operator_id=operator_id)
 
     # 清理不符合 JSON 规范的数据类型
     import numpy as np
@@ -1058,7 +1281,12 @@ app.mount("/img", StaticFiles(directory="img"), name="img")
 
 # Import and Include Knowledge Base Router
 from knowledge_base_api import router as kb_router
-app.include_router(kb_router, prefix="/api/v0", tags=["Knowledge Base"])
+app.include_router(
+    kb_router,
+    prefix="/api/v0",
+    tags=["Knowledge Base"],
+    dependencies=[Depends(get_current_user)],
+)
 
 # CORS Middleware
 app.add_middleware(
@@ -1078,6 +1306,10 @@ class QuestionRequest(BaseModel):
 class SqlRequest(BaseModel):
     sql: str
     question: str = None
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
 class FeedbackRequest(BaseModel):
     question: str
@@ -1145,15 +1377,41 @@ def send_lark_alert(feedback: FeedbackRequest):
         import traceback
         traceback.print_exc()
 
+def _require_operator_id(current_user: Dict[str, Any]) -> str:
+    operator_id = (current_user or {}).get("operator_id", "")
+    if TENANT_ISOLATION_ENABLED and not operator_id:
+        raise HTTPException(status_code=401, detail="租户隔离已启用，但未绑定 operator_id")
+    return operator_id
+
+@app.post("/api/v0/login")
+def login(request: LoginRequest):
+    if not AUTH_ENABLED:
+        raise HTTPException(status_code=400, detail="认证功能已关闭")
+    user = _authenticate_user(request.username, request.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    token = _issue_token(user)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "operator_id": user["operator_id"],
+        "expires_in": AUTH_TOKEN_TTL_SECONDS,
+    }
+
 @app.get("/api/v0/config")
 def get_config():
     # Controls whether the frontend displays the raw SQL code block
     # Default to False for production/business users
-    show_sql = os.getenv('SHOW_SQL_DEBUG', 'False').lower() == 'true'
+    raw_value = os.getenv('SHOW_SQL_DEBUG', 'False')
+    show_sql = raw_value.lower() == 'true'
+    print(f"[DEBUG] SHOW_SQL_DEBUG 原始值: '{raw_value}', 解析后: {show_sql}")
     return {"show_sql": show_sql}
 
 @app.post("/api/v0/generate_sql")
-def generate_sql(request: QuestionRequest):
+def generate_sql(
+    request: QuestionRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     try:
         print(f"\n{'='*60}")
         print(f"[DEBUG] 接收到问题: {request.question}")
@@ -1169,10 +1427,14 @@ def generate_sql(request: QuestionRequest):
         # 0.2 意图识别（用于趋势类SQL约束）
         intent = vn.detect_intent(request.question)
         
-        # 0.3 获取该会话的对话历史
-        history = conversation_history.get_context_history(session_id)
+        # 0.3 获取当前用户的 operator_id
+        operator_id = _require_operator_id(current_user)
+        
+        # 0.4 获取该会话的对话历史（带租户隔离）
+        history = conversation_history.get_context_history(session_id, operator_id=operator_id)
         print(f"[DEBUG] Session ID: {session_id}, 历史记录数: {len(history)}")
         print(f"[DEBUG] Intent: {intent}")
+        print(f"[DEBUG] Operator ID: {operator_id}")
         
         # 1. Generate SQL using Optimized Vanna Method (Single Pass for SQL + Explanation)
         # 将对话历史传递给 generate_sql_optimized
@@ -1180,7 +1442,8 @@ def generate_sql(request: QuestionRequest):
             question=request.question, 
             allow_llm_to_see_data=True,
             conversation_history=history,
-            intent=intent
+            intent=intent,
+            operator_id=operator_id,
         )
         
         # 【调试日志】记录LLM原始输出,方便排查问题
@@ -1296,7 +1559,8 @@ def generate_sql(request: QuestionRequest):
                     question=retry_prompt,
                     allow_llm_to_see_data=True,
                     conversation_history=history,
-                    intent=intent
+                    intent=intent,
+                    operator_id=operator_id,
                 )
                 retry_match = re.search(r"```sql\s*(.*?)\s*```", raw_retry, re.DOTALL | re.IGNORECASE)
                 if retry_match:
@@ -1306,12 +1570,17 @@ def generate_sql(request: QuestionRequest):
                         clean_sql = retry_sql
                         print("[DEBUG] Trend SQL validation passed after retry.")
             
-            # 保存对话历史
-            conversation_history.add_message(session_id, "user", request.question)
-            print(f"[DEBUG] 已保存对话历史到 session {session_id}")
+            # 保存对话历史（带租户隔离）
+            conversation_history.add_message(session_id, "user", request.question, operator_id=operator_id)
+            print(f"[DEBUG] 已保存对话历史到 session {session_id}, operator_id={operator_id}")
 
             try:
-                df, chart_json = run_query_and_chart(clean_sql, request.question)
+                clean_sql = transform_sql_with_tenant(clean_sql, operator_id)
+                df, chart_json = run_query_and_chart(
+                    clean_sql,
+                    request.question,
+                    operator_id=operator_id,
+                )
             except pymysql.Error as e:
                 error_msg = f"数据库错误: {str(e)}"
                 print(error_msg)
@@ -1332,7 +1601,8 @@ def generate_sql(request: QuestionRequest):
                     "columns": columns,
                     "chart": chart_json,
                     "intent": intent,
-                }
+                },
+                operator_id=operator_id,  # 添加租户隔离
             )
 
             return {
@@ -1349,10 +1619,10 @@ def generate_sql(request: QuestionRequest):
             # No SQL found, treat as conversational response
             print(f"[DEBUG] {'未检测到SQL，作为对话回复处理' if user_lang == 'zh' else 'No SQL detected, treating as conversational response'}")
             
-            # 保存对话历史
-            conversation_history.add_message(session_id, "user", request.question)
-            conversation_history.add_message(session_id, "assistant", raw_result)
-            print(f"[DEBUG] 已保存对话历史到 session {session_id}")
+            # 保存对话历史（带租户隔离）
+            conversation_history.add_message(session_id, "user", request.question, operator_id=operator_id)
+            conversation_history.add_message(session_id, "assistant", raw_result, operator_id=operator_id)
+            print(f"[DEBUG] 已保存对话历史到 session {session_id}, operator_id={operator_id}")
             
             return {
                 "text": raw_result,
@@ -1370,10 +1640,18 @@ def generate_sql(request: QuestionRequest):
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.post("/api/v0/run_sql")
-def run_sql(request: SqlRequest):
+def run_sql(
+    request: SqlRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     try:
+        operator_id = _require_operator_id(current_user)
         print(f"Executing SQL: {request.sql}")  # Add logging to debug SQL errors
-        df, chart_json = run_query_and_chart(request.sql, request.question)
+        df, chart_json = run_query_and_chart(
+            request.sql,
+            request.question,
+            operator_id=operator_id,
+        )
 
         # Convert DataFrame to list of dicts for JSON response
         return {
@@ -1395,43 +1673,70 @@ def run_sql(request: SqlRequest):
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.post("/api/v0/clear_session")
-def clear_session(session_id: str = Body(..., embed=True)):
-    """清除指定会话的对话历史"""
+def clear_session(
+    session_id: str = Body(..., embed=True),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """清除指定会话的对话历史（带租户隔离验证）"""
     try:
-        conversation_history.clear_session(session_id)
-        print(f"[DEBUG] 已清除 session {session_id} 的历史记录")
+        operator_id = (current_user or {}).get("operator_id", "")
+        success = conversation_history.clear_session(session_id, operator_id=operator_id)
+        if not success:
+            raise HTTPException(status_code=403, detail="无权删除此会话")
+        print(f"[DEBUG] 已清除 session {session_id} 的历史记录, operator_id={operator_id}")
         return {"success": True, "message": "会话历史已清除"}
+    except HTTPException:
+        raise
     except Exception as e:
         error_msg = f"清除会话失败: {str(e)}"
         print(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get("/api/v0/sessions")
-def get_sessions():
-    """获取所有活跃会话"""
-    return conversation_history.get_sessions()
+def get_sessions(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取当前用户的所有活跃会话（按 operator_id 过滤）"""
+    operator_id = (current_user or {}).get("operator_id", "")
+    return conversation_history.get_sessions(operator_id=operator_id)
 
 @app.get("/api/v0/history/{session_id}")
-def get_history(session_id: str):
-    """获取指定会话的历史"""
-    return conversation_history.get_history(session_id)
+def get_history(
+    session_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取指定会话的历史（带租户隔离验证）"""
+    operator_id = (current_user or {}).get("operator_id", "")
+    return conversation_history.get_history(session_id, operator_id=operator_id)
 
 @app.post("/api/v0/sessions/{session_id}/rename")
-def rename_session(session_id: str, body: Dict = Body(...)):
-    """重命名会话"""
+def rename_session(
+    session_id: str,
+    body: Dict = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """重命名会话（带租户隔离验证）"""
+    operator_id = (current_user or {}).get("operator_id", "")
     new_title = body.get("title")
-    if conversation_history.rename_session(session_id, new_title):
+    if conversation_history.rename_session(session_id, new_title, operator_id=operator_id):
         return {"success": True, "message": "Session renamed"}
-    raise HTTPException(status_code=404, detail="Session not found")
+    raise HTTPException(status_code=404, detail="会话不存在或无权操作")
 
 @app.delete("/api/v0/sessions/{session_id}")
-def delete_session(session_id: str):
-    """删除指定会话"""
-    conversation_history.clear_session(session_id)
+def delete_session(
+    session_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """删除指定会话（带租户隔离验证）"""
+    operator_id = (current_user or {}).get("operator_id", "")
+    success = conversation_history.clear_session(session_id, operator_id=operator_id)
+    if not success:
+        raise HTTPException(status_code=403, detail="无权删除此会话")
     return {"success": True, "message": "Session deleted"}
 
 @app.post("/api/v0/feedback")
-def submit_feedback(request: FeedbackRequest):
+def submit_feedback(
+    request: FeedbackRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     print(f"收到反馈: {request.feedback_type} - {request.question}")
 
     # 如果是点踩，发送飞书通知
@@ -1441,7 +1746,7 @@ def submit_feedback(request: FeedbackRequest):
     return {"status": "success", "message": "Feedback received"}
 
 @app.post("/api/v0/generate_questions")
-def generate_questions():
+def generate_questions(current_user: Dict[str, Any] = Depends(get_current_user)):
     # Simple placeholder or call vn.generate_questions() if available
     return ["How many users are there?", "Show me the latest orders"]
 
