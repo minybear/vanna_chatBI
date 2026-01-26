@@ -220,9 +220,12 @@ class ZhipuAI_Chat(VannaBase):
         if len(prompt) == 0:
             raise Exception("Prompt is empty")
 
+        # 支持从 kwargs 中获取 model，如果没有则使用 self.model，最后默认 "glm-4"
+        model = kwargs.get('model', self.model if hasattr(self, 'model') else "glm-4")
+        
         client = ZhipuAI(api_key=self.api_key)
         response = client.chat.completions.create(
-            model="glm-4",
+            model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,

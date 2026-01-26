@@ -104,8 +104,8 @@ def train_from_csv(csv_file_path: str):
         traceback.print_exc()
 
 if __name__ == "__main__":
-    # CSV文件路径
-    csv_file = r"d:\redtea\workSpc\dev-tools\ideaProjects\true\ES\ES_RAG_Knowledge_Base_v2.csv"
+    # CSV文件路径 - 使用项目内的知识库文件
+    csv_file = r"d:\redtea\workSpc\dev-tools\ideaProjects\ai\chatBi\vanna_chatBI\ES_RAG_Knowledge_Base_v2.csv"
     
     print("=" * 60)
     print("🤖 redtea chatBi - 增量知识库训练工具")

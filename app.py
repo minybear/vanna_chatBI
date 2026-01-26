@@ -6,6 +6,8 @@ import uuid
 import requests
 import secrets
 import jwt
+import difflib
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from decimal import Decimal
 from vanna.legacy.openai import OpenAI_Chat
@@ -21,6 +23,13 @@ import pandas as pd
 from pydantic import BaseModel
 from openai import OpenAI
 from typing import Optional, List, Dict, Any
+
+# 数据源和知识库管理
+from datasource_manager import init_datasource_manager, get_datasource_manager
+from knowledge_base_manager import init_kb_manager, get_kb_manager
+from analytics_manager import init_analytics_manager, get_analytics_manager
+from insight_engine import init_insight_engine, get_insight_engine
+from insight_scheduler import start_insight_scheduler
 
 # Load environment variables
 load_dotenv()
@@ -43,6 +52,8 @@ print("="*60)
 AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() == "true"
 AUTH_USERS_JSON = os.getenv("AUTH_USERS_JSON", "")
 AUTH_TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL_SECONDS", "86400"))
+AUTH_TOKEN_SLIDING_ENABLED = os.getenv("AUTH_TOKEN_SLIDING_ENABLED", "true").lower() == "true"
+AUTH_TOKEN_REFRESH_SECONDS = int(os.getenv("AUTH_TOKEN_REFRESH_SECONDS", "1800"))
 # JWT 密钥，生产环境务必通过环境变量设置一个强随机字符串
 JWT_SECRET = os.getenv("JWT_SECRET", "chatbi-default-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
@@ -126,7 +137,30 @@ def _parse_bearer_token(authorization: Optional[str]) -> Optional[str]:
     return None
 
 
+def _maybe_refresh_token(payload: Dict[str, Any], response: Response) -> None:
+    if not AUTH_TOKEN_SLIDING_ENABLED:
+        return
+    exp_ts = payload.get("exp")
+    if not exp_ts:
+        return
+    try:
+        exp_ts = int(exp_ts)
+    except Exception:
+        return
+    now_ts = int(datetime.utcnow().timestamp())
+    remaining = exp_ts - now_ts
+    if remaining > AUTH_TOKEN_REFRESH_SECONDS:
+        return
+    refreshed = _issue_token({
+        "username": payload.get("username"),
+        "operator_id": payload.get("operator_id"),
+    })
+    response.headers["X-Auth-Token"] = refreshed
+    response.headers["X-Auth-Expires-In"] = str(AUTH_TOKEN_TTL_SECONDS)
+
+
 def get_current_user(
+    response: Response,
     authorization: Optional[str] = Header(None),
     x_auth_token: Optional[str] = Header(None),
 ) -> Dict[str, Any]:
@@ -140,6 +174,7 @@ def get_current_user(
     try:
         # JWT 无状态验证，不依赖服务器内存
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        _maybe_refresh_token(payload, response)
         return {
             "username": payload.get("username"),
             "operator_id": payload.get("operator_id"),
@@ -232,6 +267,10 @@ class ChromaConversationHistory:
             name="chat_sessions",
             embedding_function=self.embedding_function,
         )
+        self.pins = chroma_client.get_or_create_collection(
+            name="pinned_charts",
+            embedding_function=self.embedding_function,
+        )
 
     def _now(self) -> str:
         return datetime.now().isoformat()
@@ -247,10 +286,20 @@ class ChromaConversationHistory:
                 "updated_at": meta.get("updated_at"),
                 "message_count": meta.get("message_count", 0),
                 "operator_id": meta.get("operator_id", ""),
+                "username": meta.get("username", ""),
             }
         return None
 
-    def _upsert_session(self, session_id: str, title: str, created_at: str, updated_at: str, message_count: int, operator_id: str = ""):
+    def _upsert_session(
+        self,
+        session_id: str,
+        title: str,
+        created_at: str,
+        updated_at: str,
+        message_count: int,
+        operator_id: str = "",
+        username: str = "",
+    ):
         self.sessions.upsert(
             ids=[session_id],
             documents=[title],
@@ -260,10 +309,19 @@ class ChromaConversationHistory:
                 "updated_at": updated_at,
                 "message_count": message_count,
                 "operator_id": operator_id,
+                "username": username,
             }],
         )
 
-    def add_message(self, session_id: str, role: str, content: str, data: Optional[Dict] = None, operator_id: str = ""):
+    def add_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        data: Optional[Dict] = None,
+        operator_id: str = "",
+        username: str = "",
+    ) -> str:
         """添加一条消息到会话历史（带租户隔离）"""
         now = self._now()
         def _sanitize_for_json(value):
@@ -315,6 +373,7 @@ class ChromaConversationHistory:
                 "timestamp": now,
                 "role": role,
                 "operator_id": operator_id,  # 添加租户标识
+                "username": username,
             }],
         )
 
@@ -324,20 +383,29 @@ class ChromaConversationHistory:
             message_count = 0
             title = f"Session {session_id[:8]}"
             session_operator_id = operator_id
+            session_username = username
         else:
             created_at = session_record.get("created_at") or now
             message_count = session_record.get("message_count", 0)
             title = session_record.get("title") or f"Session {session_id[:8]}"
             # 保留原有的 operator_id，如果没有则使用传入的
             session_operator_id = session_record.get("operator_id") or operator_id
+            session_username = session_record.get("username") or username
 
         message_count += 1
         if role == "user" and message_count == 1:
             title = content[:30] + ("..." if len(content) > 30 else "")
 
-        self._upsert_session(session_id, title, created_at, now, message_count, session_operator_id)
+        self._upsert_session(session_id, title, created_at, now, message_count, session_operator_id, session_username)
+        return msg_id
 
-    def get_history(self, session_id: str, limit: Optional[int] = None, operator_id: str = "") -> List[Dict]:
+    def get_history(
+        self,
+        session_id: str,
+        limit: Optional[int] = None,
+        operator_id: str = "",
+        username: str = "",
+    ) -> List[Dict]:
         """获取指定会话的历史记录（带租户隔离验证）"""
         # 先验证会话归属
         session_record = self._get_session_record(session_id)
@@ -346,6 +414,11 @@ class ChromaConversationHistory:
             if session_owner and session_owner != operator_id:
                 print(f"[DEBUG] 会话 {session_id} 属于 {session_owner}，当前用户 {operator_id} 无权访问")
                 return []  # 无权访问其他用户的会话
+        if session_record and username:
+            session_user = session_record.get("username", "")
+            if session_user and session_user != username:
+                print(f"[DEBUG] 会话 {session_id} 属于 {session_user}，当前用户 {username} 无权访问")
+                return []
         
         data = self.messages.get(where={"session_id": session_id})
         if not data or not data.get("ids"):
@@ -371,10 +444,199 @@ class ChromaConversationHistory:
             messages = messages[-limit:]
         return messages
 
-    def get_context_history(self, session_id: str, operator_id: str = "") -> List[Dict]:
-        return self.get_history(session_id, limit=self.max_history, operator_id=operator_id)
+    def list_recent_messages(
+        self,
+        operator_id: str = "",
+        username: str = "",
+        limit: int = 200,
+        since_days: int = 7,
+    ) -> List[Dict]:
+        """获取最近消息（按 operator_id/username 过滤）"""
+        if username and operator_id:
+            data = self.messages.get(where={"$and": [{"operator_id": operator_id}, {"username": username}]})
+        elif username:
+            data = self.messages.get(where={"username": username})
+        elif operator_id:
+            data = self.messages.get(where={"operator_id": operator_id})
+        else:
+            data = self.messages.get()
+        if not data or not data.get("ids"):
+            return []
 
-    def clear_session(self, session_id: str, operator_id: str = "") -> bool:
+        ids = data.get("ids") or []
+        documents = data.get("documents") or []
+        metadatas = data.get("metadatas") or []
+        messages: List[Dict] = []
+        cutoff = datetime.now() - timedelta(days=since_days)
+
+        for msg_id, doc, meta in zip(ids, documents, metadatas):
+            try:
+                msg = json.loads(doc) if isinstance(doc, str) else {"content": doc}
+            except Exception:
+                msg = {"content": doc}
+            msg.setdefault("role", meta.get("role"))
+            msg.setdefault("timestamp", meta.get("timestamp"))
+            msg["id"] = msg_id
+            ts = msg.get("timestamp")
+            try:
+                ts_dt = datetime.fromisoformat(ts) if ts else None
+            except Exception:
+                ts_dt = None
+            if ts_dt and ts_dt < cutoff:
+                continue
+            messages.append(msg)
+
+        messages.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
+        return messages[:limit]
+
+    def get_message_by_id(self, message_id: str, operator_id: str = "", username: str = "") -> Optional[Dict]:
+        data = self.messages.get(ids=[message_id])
+        if not data or not data.get("ids"):
+            return None
+        meta = (data.get("metadatas") or [{}])[0] or {}
+        if operator_id:
+            owner_id = meta.get("operator_id", "")
+            if owner_id and owner_id != operator_id:
+                return None
+        if username:
+            owner_name = meta.get("username", "")
+            if owner_name and owner_name != username:
+                return None
+        doc = (data.get("documents") or [None])[0]
+        try:
+            msg = json.loads(doc) if isinstance(doc, str) else {"content": doc}
+        except Exception:
+            msg = {"content": doc}
+        msg.setdefault("role", meta.get("role"))
+        msg.setdefault("timestamp", meta.get("timestamp"))
+        msg["id"] = message_id
+        return msg
+
+    def set_message_feedback(self, message_id: str, feedback_type: str, operator_id: str = "") -> bool:
+        data = self.messages.get(ids=[message_id])
+        if not data or not data.get("ids"):
+            return False
+        meta = (data.get("metadatas") or [{}])[0]
+        if operator_id:
+            owner_id = meta.get("operator_id", "")
+            if owner_id and owner_id != operator_id:
+                return False
+        doc = (data.get("documents") or [None])[0]
+        try:
+            payload = json.loads(doc) if isinstance(doc, str) else {"content": doc}
+        except Exception:
+            payload = {"content": doc}
+        payload["feedback_type"] = feedback_type
+        payload["feedback_at"] = self._now()
+        self.messages.upsert(
+            ids=[message_id],
+            documents=[json.dumps(payload, ensure_ascii=False)],
+            metadatas=[meta],
+        )
+        return True
+
+    def list_pinned(self, operator_id: str = "", username: str = "") -> List[Dict[str, Any]]:
+        data = None
+        if username and operator_id:
+            data = self.pins.get(where={"$and": [{"operator_id": operator_id}, {"username": username}]})
+        elif username:
+            data = self.pins.get(where={"username": username})
+        elif operator_id:
+            data = self.pins.get(where={"operator_id": operator_id})
+        if data is None:
+            data = self.pins.get()
+        documents = data.get("documents") if data else []
+        pinned_items = []
+        for doc in documents or []:
+            try:
+                pinned_items.append(json.loads(doc))
+            except Exception:
+                continue
+        pinned_items.sort(key=lambda x: x.get("position", 0))
+        return pinned_items
+
+    def clear_pins(self, operator_id: str = "", username: str = "") -> int:
+        if username and operator_id:
+            data = self.pins.get(where={"$and": [{"operator_id": operator_id}, {"username": username}]})
+        elif username:
+            data = self.pins.get(where={"username": username})
+        elif operator_id:
+            data = self.pins.get(where={"operator_id": operator_id})
+        else:
+            data = self.pins.get()
+        ids = data.get("ids") if data else []
+        if not ids:
+            return 0
+        self.pins.delete(ids=ids)
+        return len(ids)
+
+    def pin_message(self, message_id: str, operator_id: str = "", username: str = "") -> Dict[str, Any]:
+        existing = self.pins.get(ids=[message_id])
+        if existing and existing.get("ids"):
+            doc = (existing.get("documents") or [None])[0]
+            return json.loads(doc) if isinstance(doc, str) else {"message_id": message_id}
+
+        message = self.get_message_by_id(message_id, operator_id=operator_id, username=username)
+        if not message:
+            raise ValueError("消息不存在或无权访问")
+        has_chart = bool(message.get("chart"))
+        has_table = bool(message.get("result")) and bool(message.get("columns"))
+        if not (has_chart or has_table):
+            raise ValueError("该消息没有可收藏的图表")
+
+        pinned_items = self.list_pinned(operator_id=operator_id, username=username)
+        used_positions = {item.get("position") for item in pinned_items}
+        if len(used_positions) >= 6:
+            raise ValueError("看板最多支持 6 个收藏图表")
+        position = next(pos for pos in range(6) if pos not in used_positions)
+
+        payload = {
+            "message_id": message_id,
+            "question": message.get("question") or message.get("content") or "",
+            "sql": message.get("sql") or "",
+            "chart": message.get("chart"),
+            "columns": message.get("columns"),
+            "result": message.get("result"),
+            "datasource_id": message.get("datasource_id") or "",
+            "operator_id": operator_id or "",
+            "username": username or "",
+            "pinned_at": self._now(),
+            "last_refreshed": self._now(),
+            "position": position,
+        }
+        self.pins.upsert(
+            ids=[message_id],
+            documents=[json.dumps(payload, ensure_ascii=False)],
+            metadatas=[{"operator_id": operator_id or "", "username": username or "", "position": position}],
+        )
+        return payload
+
+    def unpin_message(self, message_id: str, operator_id: str = "", username: str = "") -> bool:
+        if operator_id or username:
+            data = self.pins.get(ids=[message_id])
+            if not data or not data.get("ids"):
+                return False
+            meta = (data.get("metadatas") or [{}])[0]
+            owner_id = meta.get("operator_id", "")
+            owner_name = meta.get("username", "")
+            if operator_id and owner_id and owner_id != operator_id:
+                return False
+            if username and owner_name and owner_name != username:
+                return False
+        self.pins.delete(ids=[message_id])
+        return True
+
+    def update_pinned(self, message_id: str, payload: Dict[str, Any], operator_id: str = "", username: str = "") -> None:
+        self.pins.upsert(
+            ids=[message_id],
+            documents=[json.dumps(payload, ensure_ascii=False)],
+            metadatas=[{"operator_id": operator_id or "", "username": username or "", "position": payload.get("position", 0)}],
+        )
+
+    def get_context_history(self, session_id: str, operator_id: str = "", username: str = "") -> List[Dict]:
+        return self.get_history(session_id, limit=self.max_history, operator_id=operator_id, username=username)
+
+    def clear_session(self, session_id: str, operator_id: str = "", username: str = "") -> bool:
         """清除指定会话的历史（带租户隔离验证）"""
         # 先验证会话归属
         session_record = self._get_session_record(session_id)
@@ -383,19 +645,28 @@ class ChromaConversationHistory:
             if session_owner and session_owner != operator_id:
                 print(f"[DEBUG] 会话 {session_id} 属于 {session_owner}，当前用户 {operator_id} 无权删除")
                 return False  # 无权删除其他用户的会话
+        if session_record and username:
+            session_user = session_record.get("username", "")
+            if session_user and session_user != username:
+                print(f"[DEBUG] 会话 {session_id} 属于 {session_user}，当前用户 {username} 无权删除")
+                return False
         
         self.messages.delete(where={"session_id": session_id})
         self.sessions.delete(ids=[session_id])
         return True
 
-    def get_sessions(self, operator_id: str = "") -> List[Dict]:
-        """获取用户的会话列表（按 operator_id 过滤）"""
-        # 如果提供了 operator_id，只返回该用户的会话
-        if operator_id:
+    def get_sessions(self, operator_id: str = "", username: str = "") -> List[Dict]:
+        """获取用户的会话列表（按 operator_id/username 过滤）"""
+        # 如果提供了 username 或 operator_id，只返回该用户的会话
+        if username and operator_id:
+            data = self.sessions.get(where={"$and": [{"operator_id": operator_id}, {"username": username}]})
+        elif username:
+            data = self.sessions.get(where={"username": username})
+        elif operator_id:
             data = self.sessions.get(where={"operator_id": operator_id})
         else:
             data = self.sessions.get()
-        
+
         if not data or not data.get("ids"):
             return []
 
@@ -404,18 +675,42 @@ class ChromaConversationHistory:
         documents = data.get("documents") or []
         metadatas = data.get("metadatas") or []
         for session_id, doc, meta in zip(ids, documents, metadatas):
-            title = doc or meta.get("title") or f"Session {session_id}"
+            title = doc or (meta or {}).get("title") or f"Session {session_id}"
             sessions_list.append({
                 "id": session_id,
                 "title": title,
-                "created_at": meta.get("created_at"),
-                "updated_at": meta.get("updated_at", meta.get("created_at")),
-                "message_count": meta.get("message_count", 0),
+                "created_at": (meta or {}).get("created_at"),
+                "updated_at": (meta or {}).get("updated_at", (meta or {}).get("created_at")),
+                "message_count": (meta or {}).get("message_count", 0),
             })
 
         return sorted(sessions_list, key=lambda x: x.get("updated_at") or "", reverse=True)
 
-    def rename_session(self, session_id: str, new_title: str, operator_id: str = "") -> bool:
+    def list_operator_ids(self) -> List[str]:
+        """获取所有存在会话的 operator_id 列表"""
+        data = self.sessions.get()
+        if not data or not data.get("ids"):
+            return []
+        metadatas = data.get("metadatas") or []
+        operator_ids = {meta.get("operator_id", "") for meta in metadatas if isinstance(meta, dict)}
+        if not operator_ids:
+            operator_ids.add("")
+        return sorted(operator_ids)
+
+    def list_usernames(self, operator_id: str = "") -> List[str]:
+        """获取指定 operator 下的 username 列表"""
+        if operator_id:
+            data = self.sessions.get(where={"operator_id": operator_id})
+        else:
+            data = self.sessions.get()
+        if not data or not data.get("ids"):
+            return []
+        metadatas = data.get("metadatas") or []
+        usernames = {meta.get("username", "") for meta in metadatas if isinstance(meta, dict)}
+        usernames.discard("")
+        return sorted(usernames)
+
+    def rename_session(self, session_id: str, new_title: str, operator_id: str = "", username: str = "") -> bool:
         """重命名会话（带租户隔离验证）"""
         session_record = self._get_session_record(session_id)
         if session_record is None:
@@ -427,13 +722,19 @@ class ChromaConversationHistory:
             if session_owner and session_owner != operator_id:
                 print(f"[DEBUG] 会话 {session_id} 属于 {session_owner}，当前用户 {operator_id} 无权重命名")
                 return False  # 无权重命名其他用户的会话
+        if username:
+            session_user = session_record.get("username", "")
+            if session_user and session_user != username:
+                print(f"[DEBUG] 会话 {session_id} 属于 {session_user}，当前用户 {username} 无权重命名")
+                return False
         
         created_at = session_record.get("created_at") or self._now()
         updated_at = self._now()
         message_count = session_record.get("message_count", 0)
         title = new_title or session_record.get("title") or f"Session {session_id}"
         session_operator_id = session_record.get("operator_id") or operator_id
-        self._upsert_session(session_id, title, created_at, updated_at, message_count, session_operator_id)
+        session_username = session_record.get("username") or username
+        self._upsert_session(session_id, title, created_at, updated_at, message_count, session_operator_id, session_username)
         return True
 
 class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
@@ -447,6 +748,9 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
             base_url=config['api_base']
         )
 
+        self.sql_model = os.getenv("OPENROUTER_SQL_MODEL", "openai/gpt-5.1")
+        self.sql_client = self._build_openrouter_client()
+
         # Remove api_base from config to avoid Vanna legacy check error
         vanna_config = config.copy()
         if 'api_base' in vanna_config:
@@ -454,6 +758,43 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
 
         # Initialize OpenAI_Chat with the client
         OpenAI_Chat.__init__(self, client=client, config=vanna_config)
+
+    def _build_openrouter_client(self) -> Optional[OpenAI]:
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            return None
+
+        base_url = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1")
+        referer = os.getenv("OPENROUTER_REFERER")
+        app_name = os.getenv("OPENROUTER_APP_NAME")
+        headers = {}
+        if referer:
+            headers["HTTP-Referer"] = referer
+        if app_name:
+            headers["X-Title"] = app_name
+
+        if headers:
+            return OpenAI(api_key=api_key, base_url=base_url, default_headers=headers)
+        return OpenAI(api_key=api_key, base_url=base_url)
+
+    def _submit_sql_prompt(self, prompt, **kwargs) -> str:
+        if self.sql_client is None:
+            return self.submit_prompt(prompt, **kwargs)
+
+        if prompt is None:
+            raise Exception("Prompt is None")
+
+        if len(prompt) == 0:
+            raise Exception("Prompt is empty")
+
+        model = kwargs.get("model", self.sql_model)
+        response = self.sql_client.chat.completions.create(
+            model=model,
+            messages=prompt,
+            stop=None,
+            temperature=self.temperature,
+        )
+        return response.choices[0].message.content
 
     def get_similar_question_sql(self, question: str, **kwargs) -> list:
         """
@@ -691,6 +1032,56 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
             if chart_recommendation is None:
                 print(f"[DEBUG] 明细数据场景（内部检测），不生成可视化代码")
                 return None  # 返回 None，不生成图表
+
+        # 2.5 趋势且存在分类维度时，优先生成多序列折线图（每个分类一条线）
+        question_text = (question or "").lower()
+        wants_category_series = any(k in question_text for k in ["每一项", "每个", "各", "分别", "按", "按类", "按类型", "按名称"])
+        is_trend = "line" in chart_recommendation.lower() or "trend" in question_text or "趋势" in question_text
+        if (is_trend or wants_category_series) and categorical_cols and numeric_cols:
+            time_col = ""
+            if datetime_cols:
+                time_col = datetime_cols[0]
+            else:
+                for col in df.columns:
+                    col_lower = col.lower()
+                    if any(kw in col_lower for kw in ['date', 'time', 'dt', 'day', 'month']):
+                        time_col = col
+                        break
+
+            if time_col:
+                cat_col = ""
+                for preferred in ["license_name", "name", "type", "category"]:
+                    if preferred in df.columns:
+                        cat_col = preferred
+                        break
+                if not cat_col:
+                    cat_col = categorical_cols[0]
+
+                if "license_total_capacity" in df.columns and ("容量" in question_text or "capacity" in question_text):
+                    value_col = "license_total_capacity"
+                elif "daily_total_used" in df.columns:
+                    value_col = "daily_total_used"
+                else:
+                    preferred_metrics = [c for c in numeric_cols if any(k in c.lower() for k in ["used", "count", "total", "amount"])]
+                    value_col = preferred_metrics[0] if preferred_metrics else numeric_cols[0]
+                title = (question or "趋势分析").replace("'", "").strip() or "趋势分析"
+                return (
+                    "import pandas as pd\n"
+                    "import plotly.express as px\n\n"
+                    f"df['{time_col}'] = pd.to_datetime(df['{time_col}'], errors='coerce')\n"
+                    "df = df.dropna(subset=["
+                    f"'{time_col}', '{cat_col}', '{value_col}'"
+                    "])\n"
+                    f"fig = px.line(\n"
+                    f"    df,\n"
+                    f"    x='{time_col}',\n"
+                    f"    y='{value_col}',\n"
+                    f"    color='{cat_col}',\n"
+                    f"    title='{title}',\n"
+                    f"    labels={{'{time_col}': '日期', '{value_col}': '数值', '{cat_col}': '类型'}},\n"
+                    f")\n"
+                    "fig.update_layout(font=dict(size=14), hovermode='x unified')\n"
+                )
         
         # 3. 构建提示词
         if user_lang == 'zh':
@@ -832,8 +1223,13 @@ Generate code now (code only, no explanations):
             self.user_message(user_prompt)
         ]
         
-        # 提交给LLM生成代码
-        plotly_code = self.submit_prompt(message_log, **kwargs)
+        # 提交给LLM生成代码（优先使用 OpenRouter）
+        if self.sql_client is not None:
+            call_kwargs = dict(kwargs)
+            call_kwargs["model"] = os.getenv("OPENROUTER_SQL_MODEL", self.sql_model)
+            plotly_code = self._submit_sql_prompt(message_log, **call_kwargs)
+        else:
+            plotly_code = self.submit_prompt(message_log, **kwargs)
         
         # 提取并清理代码
         return self._sanitize_plotly_code(self._extract_python_code(plotly_code))
@@ -900,9 +1296,37 @@ Generate code now (code only, no explanations):
         
         # 1. Retrieve Context
         question_sql_list = self.get_similar_question_sql(question, **kwargs)
-        
         ddl_list = self.get_related_ddl(question, **kwargs)
         doc_list = self.get_related_documentation(question, **kwargs)
+
+        # 去重：避免提示词重复导致长度膨胀与响应变慢
+        def _dedupe_strings(values: List[str]) -> List[str]:
+            seen = set()
+            result = []
+            for item in values:
+                key = (item or "").strip()
+                if key and key not in seen:
+                    seen.add(key)
+                    result.append(item)
+            return result
+
+        def _dedupe_question_sql(values: List[Dict]) -> List[Dict]:
+            seen = set()
+            result = []
+            for item in values or []:
+                if not isinstance(item, dict):
+                    continue
+                q = (item.get("question") or "").strip()
+                s = (item.get("sql") or "").strip()
+                key = (q, s)
+                if q and s and key not in seen:
+                    seen.add(key)
+                    result.append(item)
+            return result
+
+        ddl_list = _dedupe_strings(ddl_list or [])
+        doc_list = _dedupe_strings(doc_list or [])
+        question_sql_list = _dedupe_question_sql(question_sql_list or [])
 
         # 2. Construct Prompt (根据语言动态生成)
         
@@ -967,7 +1391,9 @@ Generate code now (code only, no explanations):
         initial_prompt = self.add_ddl_to_prompt(initial_prompt, ddl_list, max_tokens=3000)
 
         if self.static_documentation != "":
-            doc_list.append(self.static_documentation)
+            static_doc_key = self.static_documentation.strip()
+            if static_doc_key and static_doc_key not in {d.strip() for d in doc_list}:
+                doc_list.append(self.static_documentation)
 
         # Documentation部分限制在5000 tokens（约5-8条业务说明）
         initial_prompt = self.add_documentation_to_prompt(initial_prompt, doc_list, max_tokens=5000)
@@ -1051,8 +1477,14 @@ Generate code now (code only, no explanations):
             print(content)
         print(f"{'='*60}\n")
 
-        # 3. Submit Prompt
-        llm_response = self.submit_prompt(message_log, **kwargs)
+        # 3. Submit Prompt (SQL生成使用专用模型)
+        call_kwargs = dict(kwargs)
+        if self.sql_client is not None:
+            call_kwargs["model"] = os.getenv("OPENROUTER_SQL_MODEL", self.sql_model)
+            llm_response = self._submit_sql_prompt(message_log, **call_kwargs)
+        else:
+            call_kwargs["model"] = os.getenv("ZHIPU_MODEL", "GLM-4.7")
+            llm_response = self.submit_prompt(message_log, **call_kwargs)
 
         # 4. Handle Intermediate SQL (Simplified for optimization)
         if "intermediate_sql" in llm_response and allow_llm_to_see_data:
@@ -1074,7 +1506,10 @@ Generate code now (code only, no explanations):
                         f"The following is a pandas DataFrame with the results of the intermediate SQL query {intermediate_sql}: \n"
                         + df.to_markdown()
                     ))
-                llm_response = self.submit_prompt(message_log, **kwargs)
+                if self.sql_client is not None:
+                    llm_response = self._submit_sql_prompt(message_log, **call_kwargs)
+                else:
+                    llm_response = self.submit_prompt(message_log, **call_kwargs)
             except Exception as e:
                 if user_lang == 'zh':
                     return f"执行中间SQL时出错: {e}"
@@ -1086,21 +1521,30 @@ Generate code now (code only, no explanations):
     def run_sql(self, sql: str, **kwargs):
         # Custom SQL Runner to handle SSL and Multi-DB
         operator_id = kwargs.get("operator_id")
+        datasource_id = kwargs.get("datasource_id")  # 支持指定数据源
+        
         try:
             sql = transform_sql_with_tenant(sql, operator_id)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
 
-        db_config = {
-            'user': os.getenv('DB_USER'),
-            'password': os.getenv('DB_PASSWORD'),
-            'host': os.getenv('DB_HOST'),
-            'port': int(os.getenv('DB_PORT', 3306)),
-            'ssl': {
-                'check_hostname': False,
-                'verify_mode': False # equivalent to CERT_NONE
-            } if os.getenv('DB_SSL_ENABLED', 'True').lower() == 'true' else None
-        }
+        # 尝试使用数据源管理器获取连接配置
+        try:
+            ds_manager = get_datasource_manager()
+            db_config = ds_manager.get_connection_config(datasource_id)
+        except Exception as e:
+            print(f"[run_sql] 使用数据源管理器失败，降级到环境变量配置: {e}")
+            # 降级到环境变量配置
+            db_config = {
+                'user': os.getenv('DB_USER'),
+                'password': os.getenv('DB_PASSWORD'),
+                'host': os.getenv('DB_HOST'),
+                'port': int(os.getenv('DB_PORT', 3306)),
+                'ssl': {
+                    'check_hostname': False,
+                    'verify_mode': False  # equivalent to CERT_NONE
+                } if os.getenv('DB_SSL_ENABLED', 'True').lower() == 'true' else None
+            }
 
         try:
             cnx = pymysql.connect(**db_config)
@@ -1130,11 +1574,13 @@ zhipu_embedding = ZhipuAIEmbeddingFunction(config={
     'api_base': os.getenv('ZHIPU_API_BASE')  # Pass api_base to embedding function
 })
 
+base_dir = os.path.dirname(os.path.abspath(__file__))
+default_chroma_path = os.path.join(base_dir, "chroma_db")
 config = {
     'api_key': os.getenv('ZHIPU_API_KEY'),
-    'model': os.getenv('ZHIPU_MODEL', 'GLM-4.7'),
+    'model': os.getenv('ZHIPU_YULIAO_MODEL', 'GLM-4.5'),
     'api_base': os.getenv('ZHIPU_API_BASE'),
-    'path': './chroma_db', # Path for ChromaDB storage
+    'path': os.getenv('CHROMA_DB_PATH', default_chroma_path),  # Path for ChromaDB storage
     'embedding_function': zhipu_embedding,
     'dialect': 'MySQL', # 显式指定 MySQL 方言，防止 LLM 生成不兼容的 SQL 函数 (如 UNIX_TIMESTAMP 多参数)
     # RAG优化：限制检索数量，避免把整个知识库塞进prompt
@@ -1161,12 +1607,28 @@ conversation_history = ChromaConversationHistory(
     max_history_per_session=10
 )
 
+# 初始化数据源管理器
+print("[INIT] 初始化数据源管理器...")
+ds_manager = init_datasource_manager(vn.chroma_client)
+
+# 初始化知识库管理器
+print("[INIT] 初始化知识库管理器...")
+kb_manager = init_kb_manager(vn.chroma_client, zhipu_embedding)
+print("[INIT] 知识库管理器初始化完成")
+
+# 初始化系统指标与洞察引擎
+print("[INIT] 初始化 Analytics 管理器...")
+analytics_manager = init_analytics_manager(vn.chroma_client)
+print("[INIT] 初始化 Insight 引擎...")
+insight_engine = init_insight_engine(vn.chroma_client)
+
 def run_query_and_chart(
     sql: str,
     question: Optional[str] = None,
     operator_id: Optional[str] = None,
+    datasource_id: Optional[str] = None,
 ):
-    df = vn.run_sql(sql=sql, operator_id=operator_id)
+    df = vn.run_sql(sql=sql, operator_id=operator_id, datasource_id=datasource_id)
 
     # 清理不符合 JSON 规范的数据类型
     import numpy as np
@@ -1216,7 +1678,16 @@ def run_query_and_chart(
             except Exception as e:
                 print(f"[DEBUG] 列 '{col}' 无法转换为 datetime: {e}")
     
-    # 4. 先进行意图检测，判断是否需要生成图表
+    # 4. 将时间类型转换为字符串（用于 JSON 序列化，必须在图表生成之前）
+    try:
+        datetime_cols = df.select_dtypes(include=["datetime64[ns]", "datetime64[ns, UTC]"]).columns
+        for col in datetime_cols:
+            df[col] = df[col].apply(lambda v: v.isoformat() if pd.notna(v) and hasattr(v, "isoformat") else v)
+            print(f"[DEBUG] 已将列 '{col}' 的 datetime 转换为 ISO 字符串格式")
+    except Exception as e:
+        print(f"[DEBUG] 时间列序列化处理失败: {e}")
+    
+    # 5. 进行意图检测，判断是否需要生成图表
     chart_json = None
     if question:
         try:
@@ -1262,14 +1733,6 @@ def run_query_and_chart(
             print(f"可视化生成失败: {e}")
             import traceback
             traceback.print_exc()
-    
-    # 5. 将时间类型转换为字符串（用于 JSON 序列化）
-    try:
-        datetime_cols = df.select_dtypes(include=["datetime64[ns]", "datetime64[ns, UTC]"]).columns
-        for col in datetime_cols:
-            df[col] = df[col].apply(lambda v: v.isoformat() if pd.notna(v) and hasattr(v, "isoformat") else v)
-    except Exception as e:
-        print(f"[DEBUG] 时间列序列化处理失败: {e}")
 
     return df, chart_json
 
@@ -1288,6 +1751,15 @@ app.include_router(
     dependencies=[Depends(get_current_user)],
 )
 
+# Import and Include DataSource Router
+from datasource_api import router as ds_router
+app.include_router(
+    ds_router,
+    prefix="/api/v0",
+    tags=["DataSource"],
+    dependencies=[Depends(get_current_user)],
+)
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -1295,6 +1767,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Auth-Token", "X-Auth-Expires-In"],
 )
 
 # --- Manual API Routes Implementation ---
@@ -1302,10 +1775,13 @@ app.add_middleware(
 class QuestionRequest(BaseModel):
     question: str
     session_id: Optional[str] = None  # 支持会话ID以跟踪对话历史
+    datasource_id: Optional[str] = None  # 指定数据源ID
+    kb_id: Optional[str] = None  # 指定知识库ID
 
 class SqlRequest(BaseModel):
     sql: str
     question: str = None
+    datasource_id: Optional[str] = None  # 指定数据源ID
 
 class LoginRequest(BaseModel):
     username: str
@@ -1317,6 +1793,7 @@ class FeedbackRequest(BaseModel):
     explanation: str = None
     feedback_type: str  # "up" (点赞) 或 "down" (点踩)
     comment: str = None
+    message_id: Optional[str] = None
 
 def send_lark_alert(feedback: FeedbackRequest):
     """发送点踩反馈到飞书群"""
@@ -1416,10 +1893,14 @@ def generate_sql(
         print(f"\n{'='*60}")
         print(f"[DEBUG] 接收到问题: {request.question}")
         print(f"[DEBUG] 入参 session_id: {request.session_id}")
+        print(f"[DEBUG] 入参 datasource_id: {request.datasource_id}")
+        print(f"[DEBUG] 入参 kb_id: {request.kb_id}")
         print(f"{'='*60}\n")
         # 0. 获取或生成 session_id
         import uuid
         session_id = request.session_id or str(uuid.uuid4())
+        datasource_id = request.datasource_id  # 数据源ID
+        kb_id = request.kb_id  # 知识库ID
         
         # 0.1 检测用户问题的语言
         user_lang = vn.detect_language(request.question)
@@ -1431,10 +1912,13 @@ def generate_sql(
         operator_id = _require_operator_id(current_user)
         
         # 0.4 获取该会话的对话历史（带租户隔离）
-        history = conversation_history.get_context_history(session_id, operator_id=operator_id)
+        username = (current_user or {}).get("username", "")
+        history = conversation_history.get_context_history(session_id, operator_id=operator_id, username=username)
         print(f"[DEBUG] Session ID: {session_id}, 历史记录数: {len(history)}")
         print(f"[DEBUG] Intent: {intent}")
         print(f"[DEBUG] Operator ID: {operator_id}")
+        print(f"[DEBUG] DataSource ID: {datasource_id}")
+        print(f"[DEBUG] KB ID: {kb_id}")
         
         # 1. Generate SQL using Optimized Vanna Method (Single Pass for SQL + Explanation)
         # 将对话历史传递给 generate_sql_optimized
@@ -1571,15 +2055,30 @@ def generate_sql(
                         print("[DEBUG] Trend SQL validation passed after retry.")
             
             # 保存对话历史（带租户隔离）
-            conversation_history.add_message(session_id, "user", request.question, operator_id=operator_id)
+            conversation_history.add_message(
+                session_id,
+                "user",
+                request.question,
+                operator_id=operator_id,
+                username=(current_user or {}).get("username", ""),
+            )
             print(f"[DEBUG] 已保存对话历史到 session {session_id}, operator_id={operator_id}")
 
             try:
                 clean_sql = transform_sql_with_tenant(clean_sql, operator_id)
+                start_time = time.perf_counter()
                 df, chart_json = run_query_and_chart(
                     clean_sql,
                     request.question,
                     operator_id=operator_id,
+                    datasource_id=datasource_id,
+                )
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+                get_analytics_manager().record_query(
+                    latency_ms=latency_ms,
+                    operator_id=operator_id,
+                    datasource_id=datasource_id,
+                    sql=clean_sql,
                 )
             except pymysql.Error as e:
                 error_msg = f"数据库错误: {str(e)}"
@@ -1589,7 +2088,7 @@ def generate_sql(
             result_rows = df.to_dict(orient='records')
             columns = df.columns.tolist()
 
-            conversation_history.add_message(
+            assistant_msg_id = conversation_history.add_message(
                 session_id,
                 "assistant",
                 f"{explanation}\n\nSQL: {clean_sql}",
@@ -1601,8 +2100,10 @@ def generate_sql(
                     "columns": columns,
                     "chart": chart_json,
                     "intent": intent,
+                    "datasource_id": datasource_id,
                 },
                 operator_id=operator_id,  # 添加租户隔离
+                username=(current_user or {}).get("username", ""),
             )
 
             return {
@@ -1610,6 +2111,7 @@ def generate_sql(
                 "is_sql": True,
                 "explanation": explanation,
                 "session_id": session_id,  # 返回session_id给前端
+                "message_id": assistant_msg_id,
                 "result": result_rows,
                 "columns": columns,
                 "chart": chart_json,
@@ -1620,8 +2122,20 @@ def generate_sql(
             print(f"[DEBUG] {'未检测到SQL，作为对话回复处理' if user_lang == 'zh' else 'No SQL detected, treating as conversational response'}")
             
             # 保存对话历史（带租户隔离）
-            conversation_history.add_message(session_id, "user", request.question, operator_id=operator_id)
-            conversation_history.add_message(session_id, "assistant", raw_result, operator_id=operator_id)
+            conversation_history.add_message(
+                session_id,
+                "user",
+                request.question,
+                operator_id=operator_id,
+                username=(current_user or {}).get("username", ""),
+            )
+            conversation_history.add_message(
+                session_id,
+                "assistant",
+                raw_result,
+                operator_id=operator_id,
+                username=(current_user or {}).get("username", ""),
+            )
             print(f"[DEBUG] 已保存对话历史到 session {session_id}, operator_id={operator_id}")
             
             return {
@@ -1647,10 +2161,20 @@ def run_sql(
     try:
         operator_id = _require_operator_id(current_user)
         print(f"Executing SQL: {request.sql}")  # Add logging to debug SQL errors
+        print(f"DataSource ID: {request.datasource_id}")
+        start_time = time.perf_counter()
         df, chart_json = run_query_and_chart(
             request.sql,
             request.question,
             operator_id=operator_id,
+            datasource_id=request.datasource_id,
+        )
+        latency_ms = int((time.perf_counter() - start_time) * 1000)
+        get_analytics_manager().record_query(
+            latency_ms=latency_ms,
+            operator_id=operator_id,
+            datasource_id=request.datasource_id,
+            sql=request.sql,
         )
 
         # Convert DataFrame to list of dicts for JSON response
@@ -1696,7 +2220,8 @@ def clear_session(
 def get_sessions(current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取当前用户的所有活跃会话（按 operator_id 过滤）"""
     operator_id = (current_user or {}).get("operator_id", "")
-    return conversation_history.get_sessions(operator_id=operator_id)
+    username = (current_user or {}).get("username", "")
+    return conversation_history.get_sessions(operator_id=operator_id, username=username)
 
 @app.get("/api/v0/history/{session_id}")
 def get_history(
@@ -1705,7 +2230,13 @@ def get_history(
 ):
     """获取指定会话的历史（带租户隔离验证）"""
     operator_id = (current_user or {}).get("operator_id", "")
-    return conversation_history.get_history(session_id, operator_id=operator_id)
+    username = (current_user or {}).get("username", "")
+    history = conversation_history.get_history(session_id, operator_id=operator_id, username=username)
+    pinned_items = conversation_history.list_pinned(operator_id=operator_id, username=username)
+    pinned_ids = {item.get("message_id") for item in pinned_items if item.get("message_id")}
+    for msg in history:
+        msg["pinned"] = msg.get("id") in pinned_ids
+    return history
 
 @app.post("/api/v0/sessions/{session_id}/rename")
 def rename_session(
@@ -1716,7 +2247,8 @@ def rename_session(
     """重命名会话（带租户隔离验证）"""
     operator_id = (current_user or {}).get("operator_id", "")
     new_title = body.get("title")
-    if conversation_history.rename_session(session_id, new_title, operator_id=operator_id):
+    username = (current_user or {}).get("username", "")
+    if conversation_history.rename_session(session_id, new_title, operator_id=operator_id, username=username):
         return {"success": True, "message": "Session renamed"}
     raise HTTPException(status_code=404, detail="会话不存在或无权操作")
 
@@ -1727,7 +2259,8 @@ def delete_session(
 ):
     """删除指定会话（带租户隔离验证）"""
     operator_id = (current_user or {}).get("operator_id", "")
-    success = conversation_history.clear_session(session_id, operator_id=operator_id)
+    username = (current_user or {}).get("username", "")
+    success = conversation_history.clear_session(session_id, operator_id=operator_id, username=username)
     if not success:
         raise HTTPException(status_code=403, detail="无权删除此会话")
     return {"success": True, "message": "Session deleted"}
@@ -1738,12 +2271,478 @@ def submit_feedback(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     print(f"收到反馈: {request.feedback_type} - {request.question}")
+    operator_id = _require_operator_id(current_user)
+    get_analytics_manager().record_feedback(request.feedback_type, operator_id=operator_id)
+    if request.message_id:
+        conversation_history.set_message_feedback(
+            request.message_id,
+            request.feedback_type,
+            operator_id=operator_id,
+        )
 
     # 如果是点踩，发送飞书通知
     if request.feedback_type == "down":
         send_lark_alert(request)
 
     return {"status": "success", "message": "Feedback received"}
+
+
+def _refresh_pinned_item(pinned: Dict[str, Any], operator_id: str = "") -> Dict[str, Any]:
+    sql = pinned.get("sql")
+    if not sql:
+        return pinned
+    datasource_id = pinned.get("datasource_id")
+    try:
+        df, chart_json = run_query_and_chart(
+            sql,
+            pinned.get("question"),
+            operator_id=operator_id,
+            datasource_id=datasource_id,
+        )
+        result_rows = df.to_dict(orient="records")
+        columns = df.columns.tolist()
+
+        def _sanitize(value):
+            try:
+                import pandas as pd
+                from decimal import Decimal
+                if isinstance(value, Decimal):
+                    return float(value)
+                if isinstance(value, pd.Timestamp):
+                    return value.isoformat()
+            except Exception:
+                pass
+            if isinstance(value, dict):
+                return {k: _sanitize(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [_sanitize(v) for v in value]
+            if hasattr(value, "isoformat"):
+                try:
+                    return value.isoformat()
+                except Exception:
+                    return value
+            return value
+
+        result_rows = _sanitize(result_rows)
+        pinned["chart"] = chart_json
+        pinned["result"] = result_rows
+        pinned["columns"] = columns
+        pinned["last_refreshed"] = datetime.now().isoformat()
+        conversation_history.update_pinned(
+            pinned.get("message_id"),
+            pinned,
+            operator_id=operator_id,
+            username=pinned.get("username", ""),
+        )
+
+        insights_enabled = os.getenv("ANALYTICS_INSIGHT_ENABLED", "true").lower() == "true"
+        if insights_enabled:
+            get_insight_engine().generate_insights_from_result(
+                result_rows=result_rows,
+                columns=columns,
+                title_hint=pinned.get("question") or "核心指标",
+                sql=pinned.get("sql"),
+                chart=pinned.get("chart"),
+                operator_id=operator_id,
+            )
+    except Exception as exc:
+        print(f"[Analytics] 刷新收藏图表失败: {exc}")
+    return pinned
+
+
+def _normalize_similarity_text(value: str) -> str:
+    if not value:
+        return ""
+    text = str(value).strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\d+", "0", text)
+    text = re.sub(r"[`'\"\(\)\[\]\{\}]+", " ", text)
+    text = re.sub(r"[^\w\u4e00-\u9fff]+", " ", text)
+    return " ".join(text.split())
+
+
+def _build_pinned_similarity_text(item: Dict[str, Any]) -> str:
+    sql = item.get("sql") or ""
+    question = item.get("question") or item.get("content") or ""
+    return f"{_normalize_similarity_text(sql)} | {_normalize_similarity_text(question)}".strip(" |")
+
+
+def _similarity_ratio(a: str, b: str) -> float:
+    if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+_PIN_EMBED_CACHE: "OrderedDict[str, List[float]]" = OrderedDict()
+_PIN_EMBED_CACHE_MAX = 300
+
+
+def _get_zhipu_embedding_function():
+    api_key = os.getenv("ZHIPU_API_KEY")
+    if not api_key:
+        return None
+    model_name = os.getenv("ZHIPU_EMBEDDING_MODEL", "embedding-2")
+    api_base = os.getenv("ZHIPU_API_BASE")
+    try:
+        return ZhipuAIEmbeddingFunction(
+            config={"api_key": api_key, "model_name": model_name, "api_base": api_base}
+        )
+    except Exception as exc:
+        print(f"[Analytics] 初始化智谱 embedding 失败: {exc}")
+        return None
+
+
+def _get_text_embeddings(texts: List[str]) -> List[List[float]]:
+    embedding_fn = _get_zhipu_embedding_function()
+    if embedding_fn is None:
+        raise RuntimeError("ZHIPU_API_KEY 未配置或 embedding 初始化失败")
+    results: List[List[float]] = []
+    pending = []
+    pending_idx = []
+    for idx, text in enumerate(texts):
+        cached = _PIN_EMBED_CACHE.get(text)
+        if cached is not None:
+            results.append(cached)
+        else:
+            results.append([])
+            pending.append(text)
+            pending_idx.append(idx)
+    if pending:
+        embeddings = embedding_fn(pending)
+        for text, emb, idx in zip(pending, embeddings, pending_idx):
+            results[idx] = emb
+            _PIN_EMBED_CACHE[text] = emb
+        while len(_PIN_EMBED_CACHE) > _PIN_EMBED_CACHE_MAX:
+            _PIN_EMBED_CACHE.popitem(last=False)
+    for text in texts:
+        if text in _PIN_EMBED_CACHE:
+            _PIN_EMBED_CACHE.move_to_end(text)
+    return results
+
+
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    if not a or not b:
+        return 0.0
+    dot = 0.0
+    norm_a = 0.0
+    norm_b = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        norm_a += x * x
+        norm_b += y * y
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / ((norm_a ** 0.5) * (norm_b ** 0.5))
+
+
+def _pinned_completeness_score(item: Dict[str, Any]) -> float:
+    score = 0.0
+    if item.get("chart"):
+        score += 3.0
+    if item.get("result") and item.get("columns"):
+        score += 2.0
+        try:
+            score += min(len(item.get("result") or []), 20) / 20.0
+        except Exception:
+            pass
+    if item.get("sql"):
+        score += 1.0
+    if item.get("question"):
+        score += 0.5
+    return score
+
+
+def _pinned_sort_timestamp(item: Dict[str, Any]) -> str:
+    return item.get("last_refreshed") or item.get("pinned_at") or ""
+
+
+def _is_better_pinned(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    score_a = _pinned_completeness_score(a)
+    score_b = _pinned_completeness_score(b)
+    if score_a != score_b:
+        return score_a > score_b
+    return _pinned_sort_timestamp(a) >= _pinned_sort_timestamp(b)
+
+
+def _dedupe_pinned_items(items: List[Dict[str, Any]], threshold: float, mode: str) -> List[Dict[str, Any]]:
+    if not items:
+        return items
+    if mode == "ai":
+        keys = [_build_pinned_similarity_text(item) for item in items]
+        try:
+            embeddings = _get_text_embeddings(keys)
+        except Exception as exc:
+            print(f"[Analytics] AI 去重失败，回退规则模式: {exc}")
+            mode = "rule"
+    if mode == "ai":
+        groups = []
+        for item, key, emb in zip(items, keys, embeddings):
+            placed = False
+            for group in groups:
+                if _cosine_similarity(emb, group["emb"]) >= threshold:
+                    best = group["best"]
+                    if _is_better_pinned(item, best):
+                        group["best"] = item
+                        group["key"] = key
+                        group["emb"] = emb
+                    placed = True
+                    break
+            if not placed:
+                groups.append({"key": key, "best": item, "emb": emb})
+    else:
+        groups = []
+        for item in items:
+            key = _build_pinned_similarity_text(item)
+            placed = False
+            for group in groups:
+                if _similarity_ratio(key, group["key"]) >= threshold:
+                    best = group["best"]
+                    if _is_better_pinned(item, best):
+                        group["best"] = item
+                        group["key"] = key
+                    placed = True
+                    break
+            if not placed:
+                groups.append({"key": key, "best": item})
+    deduped = [group["best"] for group in groups]
+    deduped.sort(key=lambda x: x.get("position", 0))
+    return deduped
+
+
+def _refresh_all_pinned() -> None:
+    operator_ids = conversation_history.list_operator_ids()
+    for operator_id in operator_ids:
+        usernames = conversation_history.list_usernames(operator_id=operator_id)
+        if not usernames:
+            usernames = [""]
+        for username in usernames:
+            if os.getenv("ANALYTICS_AUTO_PIN_ENABLED", "true").lower() == "true":
+                _auto_pin_recent(operator_id, username=username)
+            pinned_items = conversation_history.list_pinned(operator_id=operator_id, username=username)
+            for item in pinned_items:
+                _refresh_pinned_item(item, operator_id=operator_id)
+
+
+def _auto_pin_recent(operator_id: str, username: str = "") -> None:
+    if os.getenv("ANALYTICS_AUTO_PIN_ENABLED", "true").lower() != "true":
+        return
+    max_total = 6
+    max_auto = int(os.getenv("ANALYTICS_AUTO_PIN_LIMIT", "3"))
+    recent_days = int(os.getenv("ANALYTICS_AUTO_PIN_DAYS", "7"))
+    pinned_items = conversation_history.list_pinned(operator_id=operator_id, username=username)
+    if len(pinned_items) >= max_total:
+        return
+    pinned_ids = {item.get("message_id") for item in pinned_items}
+    dedup_enabled = os.getenv("ANALYTICS_PIN_DEDUP_ENABLED", "true").lower() == "true"
+    dedup_threshold = float(os.getenv("ANALYTICS_PIN_DEDUP_THRESHOLD", "0.86"))
+    dedup_mode = os.getenv("ANALYTICS_PIN_DEDUP_MODE", "rule").lower()
+    existing_keys = []
+    for item in pinned_items:
+        key = _build_pinned_similarity_text(item)
+        if key:
+            existing_keys.append(key)
+    existing_embs: List[List[float]] = []
+    if dedup_enabled and dedup_mode == "ai" and existing_keys:
+        try:
+            existing_embs = _get_text_embeddings(existing_keys)
+        except Exception as exc:
+            print(f"[Analytics] AI 去重初始化失败，回退规则模式: {exc}")
+            dedup_mode = "rule"
+
+    recent_messages = conversation_history.list_recent_messages(
+        operator_id=operator_id,
+        username=username,
+        limit=200,
+        since_days=recent_days,
+    )
+    candidates = []
+    for msg in recent_messages:
+        if msg.get("role") != "assistant":
+            continue
+        if not msg.get("chart"):
+            continue
+        if not msg.get("sql"):
+            continue
+        if msg.get("id") in pinned_ids:
+            continue
+        candidate_key = _build_pinned_similarity_text(msg)
+        if candidate_key:
+            if dedup_enabled and dedup_mode == "ai":
+                try:
+                    candidate_emb = _get_text_embeddings([candidate_key])[0]
+                    if any(_cosine_similarity(candidate_emb, emb) >= dedup_threshold for emb in existing_embs):
+                        continue
+                except Exception:
+                    if any(_similarity_ratio(candidate_key, key) >= dedup_threshold for key in existing_keys):
+                        continue
+            elif dedup_enabled:
+                if any(_similarity_ratio(candidate_key, key) >= dedup_threshold for key in existing_keys):
+                    continue
+            else:
+                if candidate_key in existing_keys:
+                    continue
+        candidates.append(msg)
+
+    seen_keys = list(existing_keys)
+    seen_embs = list(existing_embs)
+    for msg in candidates[:max_auto]:
+        if len(conversation_history.list_pinned(operator_id=operator_id, username=username)) >= max_total:
+            break
+        candidate_key = _build_pinned_similarity_text(msg)
+        if candidate_key:
+            if dedup_enabled and dedup_mode == "ai":
+                try:
+                    candidate_emb = _get_text_embeddings([candidate_key])[0]
+                    if any(_cosine_similarity(candidate_emb, emb) >= dedup_threshold for emb in seen_embs):
+                        continue
+                except Exception:
+                    if any(_similarity_ratio(candidate_key, key) >= dedup_threshold for key in seen_keys):
+                        continue
+            elif dedup_enabled:
+                if any(_similarity_ratio(candidate_key, key) >= dedup_threshold for key in seen_keys):
+                    continue
+            else:
+                if candidate_key in seen_keys:
+                    continue
+        try:
+            conversation_history.pin_message(msg["id"], operator_id=operator_id, username=username)
+            if candidate_key:
+                seen_keys.append(candidate_key)
+                if dedup_enabled and dedup_mode == "ai":
+                    try:
+                        seen_embs.append(_get_text_embeddings([candidate_key])[0])
+                    except Exception:
+                        pass
+        except Exception as exc:
+            print(f"[Analytics] 自动收藏失败: {exc}")
+
+
+@app.get("/api/v0/analytics/metrics")
+def get_analytics_metrics(current_user: Dict[str, Any] = Depends(get_current_user)):
+    operator_id = _require_operator_id(current_user)
+    metrics = get_analytics_manager().get_metrics(operator_id=operator_id)
+    return metrics.to_dict()
+
+
+@app.get("/api/v0/analytics/insights")
+def get_analytics_insights(
+    limit: int = 10,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    operator_id = _require_operator_id(current_user)
+    items = get_insight_engine().list_insights(operator_id=operator_id, limit=limit)
+    return {"items": items}
+
+
+@app.post("/api/v0/analytics/insights/clear")
+def clear_analytics_insights(current_user: Dict[str, Any] = Depends(get_current_user)):
+    operator_id = _require_operator_id(current_user)
+    cleared = get_insight_engine().clear_insights(operator_id=operator_id)
+    return {"success": True, "cleared": cleared}
+
+
+@app.delete("/api/v0/analytics/insights/{insight_id}")
+def delete_analytics_insight(
+    insight_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    operator_id = _require_operator_id(current_user)
+    success = get_insight_engine().delete_insight(insight_id, operator_id=operator_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="洞察不存在或无权删除")
+    return {"success": True}
+
+
+@app.get("/api/v0/analytics/pinned")
+def get_pinned_charts(
+    refresh: bool = True,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    _auto_pin_recent(operator_id, username=username)
+    pinned_items = conversation_history.list_pinned(operator_id=operator_id, username=username)
+    if refresh:
+        pinned_items = [_refresh_pinned_item(item, operator_id=operator_id) for item in pinned_items]
+    if os.getenv("ANALYTICS_PIN_DEDUP_ENABLED", "true").lower() == "true":
+        dedup_threshold = float(os.getenv("ANALYTICS_PIN_DEDUP_THRESHOLD", "0.86"))
+        dedup_mode = os.getenv("ANALYTICS_PIN_DEDUP_MODE", "rule").lower()
+        pinned_items = _dedupe_pinned_items(pinned_items, dedup_threshold, dedup_mode)
+    return {"items": pinned_items}
+
+
+@app.post("/api/v0/messages/{message_id}/pin")
+def pin_message(
+    message_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    try:
+        payload = conversation_history.pin_message(message_id, operator_id=operator_id, username=username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "success": True,
+        "item": payload,
+        "items": conversation_history.list_pinned(operator_id=operator_id, username=username),
+    }
+
+
+@app.delete("/api/v0/messages/{message_id}/pin")
+def unpin_message(
+    message_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    success = conversation_history.unpin_message(message_id, operator_id=operator_id, username=username)
+    return {
+        "success": success,
+        "items": conversation_history.list_pinned(operator_id=operator_id, username=username),
+    }
+
+
+@app.post("/api/v0/analytics/pinned/{message_id}/refresh")
+def refresh_pinned_chart(
+    message_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    pinned_items = conversation_history.list_pinned(operator_id=operator_id, username=username)
+    target = next((item for item in pinned_items if item.get("message_id") == message_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="收藏图表不存在")
+    refreshed = _refresh_pinned_item(target, operator_id=operator_id)
+    return {"success": True, "item": refreshed}
+
+
+@app.post("/api/v0/analytics/refresh")
+def refresh_analytics(current_user: Dict[str, Any] = Depends(get_current_user)):
+    operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    _auto_pin_recent(operator_id, username=username)
+    pinned_items = conversation_history.list_pinned(operator_id=operator_id, username=username)
+    for item in pinned_items:
+        _refresh_pinned_item(item, operator_id=operator_id)
+    return {"success": True}
+
+
+@app.post("/api/v0/analytics/clear")
+def clear_analytics(current_user: Dict[str, Any] = Depends(get_current_user)):
+    operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    cleared_pins = conversation_history.clear_pins(operator_id=operator_id, username=username)
+    cleared_insights = get_insight_engine().clear_insights(operator_id=operator_id)
+    cleared_events = get_analytics_manager().clear_events(operator_id=operator_id)
+    return {
+        "success": True,
+        "cleared": {
+            "pins": cleared_pins,
+            "insights": cleared_insights,
+            "events": cleared_events,
+        },
+    }
 
 @app.post("/api/v0/generate_questions")
 def generate_questions(current_user: Dict[str, Any] = Depends(get_current_user)):
@@ -1758,6 +2757,16 @@ def root():
 @app.get("/ui", response_class=FileResponse)
 def ui():
     return FileResponse("templates/ui.html")
+
+
+@app.on_event("startup")
+def start_analytics_scheduler():
+    enabled = os.getenv("ANALYTICS_SCHEDULER_ENABLED", "true").lower() == "true"
+    if not enabled:
+        return
+    interval = int(os.getenv("ANALYTICS_REFRESH_INTERVAL", "3600"))
+    start_insight_scheduler(_refresh_all_pinned, interval_seconds=interval)
+
 
 if __name__ == "__main__":
     import uvicorn

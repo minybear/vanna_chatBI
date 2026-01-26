@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@antv/g2plot/dist/g2plot.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
         :root {
@@ -213,6 +214,7 @@
         .feedback-btn:hover { background: #f1f5f9; color: var(--vanna-teal); }
         .feedback-btn.active-up { color: #10b981; background: rgba(16, 185, 129, 0.1); }
         .feedback-btn.active-down { color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+        .feedback-btn.active-pin { color: #d97706; background: rgba(245, 158, 11, 0.12); }
 
         .input-area { 
             padding: 20px; 
@@ -260,6 +262,100 @@
             width: 100%;
         }
         .kb-view.active { display: block; }
+
+        .analytics-view {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            display: none;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        .analytics-view.active { display: block; }
+        .analytics-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .analytics-metric-card {
+            background: var(--vanna-surface);
+            border: 1px solid var(--vanna-border);
+            border-radius: 16px;
+            padding: 18px 20px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+        .analytics-metric-card .metric-label {
+            font-size: 12px;
+            color: var(--vanna-text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .analytics-metric-card .metric-value {
+            font-size: 26px;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+        .analytics-section {
+            margin-top: 24px;
+        }
+        .section-title {
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--vanna-text);
+        }
+        .pinned-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+        }
+        .pinned-card {
+            background: var(--vanna-surface);
+            border: 1px solid var(--vanna-border);
+            border-radius: 16px;
+            padding: 12px;
+        }
+        .pinned-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            color: var(--vanna-text-dim);
+            margin-bottom: 8px;
+        }
+        .pinned-chart {
+            width: 100%;
+            min-height: 220px;
+        }
+        .pinned-placeholder,
+        .insight-placeholder {
+            background: var(--vanna-bg);
+            border: 1px dashed var(--vanna-border);
+            border-radius: 16px;
+            padding: 24px;
+            color: var(--vanna-text-dim);
+            text-align: center;
+        }
+        .insights-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+        }
+        .insight-card {
+            background: var(--vanna-surface);
+            border: 1px solid var(--vanna-border);
+            border-radius: 16px;
+            padding: 16px;
+        }
+        .insight-card .insight-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .insight-card .insight-message {
+            color: var(--vanna-text-dim);
+            font-size: 14px;
+        }
 
         .type-badge { font-size: 11px; padding: 4px 8px; border-radius: 6px; font-weight: 600; text-transform: uppercase; }
         .type-ddl { background: rgba(2, 61, 96, 0.1); color: var(--vanna-navy); }
@@ -497,6 +593,123 @@
         .app-hidden {
             display: none !important;
         }
+
+        /* 数据源管理页面样式 */
+        .ds-view {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            display: none;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        .ds-view.active { display: block; }
+
+        .ds-card {
+            background: var(--vanna-surface);
+            border: 1px solid var(--vanna-border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            transition: all 0.2s;
+        }
+        .ds-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .ds-card.active {
+            border-color: var(--vanna-teal);
+            box-shadow: 0 0 0 3px rgba(21, 168, 168, 0.1);
+        }
+
+        .ds-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            padding: 4px 10px;
+            border-radius: 20px;
+        }
+        .ds-status.active { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+        .ds-status.inactive { background: rgba(100, 116, 139, 0.1); color: #64748b; }
+        .ds-status.error { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+
+        /* 知识库卡片样式 */
+        .kb-card {
+            background: var(--vanna-surface);
+            border: 1px solid var(--vanna-border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            transition: all 0.2s;
+        }
+        .kb-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .kb-stats {
+            display: flex;
+            gap: 16px;
+            margin-top: 12px;
+        }
+        .kb-stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--vanna-text-dim);
+        }
+        .kb-stat-value {
+            font-weight: 600;
+            color: var(--vanna-text);
+        }
+
+        /* 训练进度条 */
+        .training-progress {
+            margin-top: 12px;
+        }
+        .training-progress .progress {
+            height: 8px;
+            border-radius: 4px;
+            background: var(--vanna-bg);
+        }
+        .training-progress .progress-bar {
+            background: linear-gradient(90deg, var(--vanna-teal), #0e8a8a);
+            border-radius: 4px;
+        }
+
+        /* Chat选择器样式 */
+        .chat-selectors {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+            padding: 0 4px;
+        }
+        .chat-selector {
+            flex: 1;
+        }
+        .chat-selector label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--vanna-text-dim);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .chat-selector select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--vanna-border);
+            border-radius: 8px;
+            font-size: 13px;
+            background: var(--vanna-bg);
+            color: var(--vanna-text);
+            cursor: pointer;
+        }
+        .chat-selector select:focus {
+            outline: none;
+            border-color: var(--vanna-teal);
+        }
     </style>
 </head>
 <body>
@@ -509,8 +722,14 @@
                 <img src="/img/new-logo.b35e98b5.png" alt="redtea chatBi logo" class="brand-logo">
             </a>
             <div class="d-flex align-items-center">
-                <button class="btn btn-outline-secondary btn-sm me-2" onclick="switchView('kb')">
-                    <i class="bi bi-database me-1"></i>Knowledge Base
+                <button class="btn btn-outline-secondary btn-sm me-2" onclick="switchView('ds')">
+                    <i class="bi bi-hdd-network me-1"></i>数据源
+                </button>
+                <button class="btn btn-outline-secondary btn-sm me-2" onclick="switchView('kbm')">
+                    <i class="bi bi-book me-1"></i>知识库
+                </button>
+                <button class="btn btn-outline-secondary btn-sm me-2" onclick="switchView('analytics')">
+                    <i class="bi bi-graph-up me-1"></i>洞察
                 </button>
                 <button class="btn btn-outline-primary btn-sm" onclick="switchView('chat')">
                     <i class="bi bi-chat-dots me-1"></i>Chat
@@ -542,6 +761,20 @@
                 </div>
                 <div class="input-area">
                     <div class="input-container-inner">
+                        <div class="chat-selectors">
+                            <div class="chat-selector">
+                                <label>数据源</label>
+                                <select id="chatDatasource" onchange="onDatasourceChange()">
+                                    <option value="">默认数据源</option>
+                                </select>
+                            </div>
+                            <div class="chat-selector">
+                                <label>知识库</label>
+                                <select id="chatKnowledgeBase" onchange="onKnowledgeBaseChange()">
+                                    <option value="">默认知识库</option>
+                                </select>
+                            </div>
+                        </div>
                         <div class="input-group">
                             <input type="text" id="questionInput" class="form-control" placeholder="Ask a question about your data..." onkeypress="if(event.key==='Enter') ask()">
                             <button class="btn btn-send" onclick="ask()"><i class="bi bi-send-fill"></i></button>
@@ -550,13 +783,71 @@
                 </div>
             </div>
 
+            <div id="analyticsView" class="analytics-view">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <div>
+                        <h5 class="mb-1 fw-bold">系统概览与洞察</h5>
+                        <div class="text-muted small">自动汇总关键指标与趋势</div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <button class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="clearInsights()">
+                            <i class="bi bi-trash me-1"></i>清空洞察
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="refreshAnalytics()">
+                            <i class="bi bi-arrow-clockwise me-1"></i>刷新
+                        </button>
+                    </div>
+                </div>
+
+                <div class="analytics-metrics" id="analyticsMetrics">
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">数据更新</div>
+                        <div class="metric-value">--</div>
+                    </div>
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">AI 准确率</div>
+                        <div class="metric-value">--</div>
+                    </div>
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">平均延迟</div>
+                        <div class="metric-value">--</div>
+                    </div>
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">今日查询</div>
+                        <div class="metric-value">--</div>
+                    </div>
+                </div>
+
+                <div class="analytics-section">
+                    <div class="section-title">我的看板</div>
+                    <div class="pinned-grid" id="pinnedGrid">
+                        <div class="pinned-placeholder">从对话中点击 📌 Pin，即可加入看板</div>
+                    </div>
+                </div>
+
+                <div class="analytics-section">
+                    <div class="section-title">AI 洞察</div>
+                    <div class="insights-grid" id="insightsGrid">
+                        <div class="insight-placeholder">暂无洞察数据</div>
+                    </div>
+                </div>
+            </div>
+
             <div id="kbView" class="kb-view">
                 <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h5 class="mb-0 fw-bold">Training Data Management</h5>
+                    <div class="d-flex align-items-center">
+                        <button class="btn btn-sm btn-outline-secondary me-3" onclick="switchView('kbm')">
+                            <i class="bi bi-arrow-left me-1"></i>返回
+                        </button>
+                        <h5 class="mb-0 fw-bold">
+                            <span id="kbViewTitle">训练数据管理</span>
+                            <small class="text-muted ms-2" id="kbViewSubtitle"></small>
+                        </h5>
+                    </div>
                     <div>
-                        <button class="btn btn-sm btn-success me-2 rounded-pill px-3" onclick="showAddModal()"><i class="bi bi-plus-lg me-1"></i>Add Data</button>
-                        <button class="btn btn-sm btn-danger me-2 rounded-pill px-3" onclick="batchDelete()" id="batchDeleteBtn" style="display:none;"><i class="bi bi-trash me-1"></i>Batch Delete</button>
-                        <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="loadKnowledgeBase()"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+                        <button class="btn btn-sm btn-success me-2 rounded-pill px-3" onclick="showAddModal()"><i class="bi bi-plus-lg me-1"></i>添加数据</button>
+                        <button class="btn btn-sm btn-danger me-2 rounded-pill px-3" onclick="batchDelete()" id="batchDeleteBtn" style="display:none;"><i class="bi bi-trash me-1"></i>批量删除</button>
+                        <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="loadKnowledgeBase()"><i class="bi bi-arrow-clockwise me-1"></i>刷新</button>
                     </div>
                 </div>
                 <div class="card border-0 shadow-sm">
@@ -565,17 +856,43 @@
                             <thead class="table-light">
                                 <tr>
                                     <th style="width: 40px" class="ps-3"><input class="form-check-input" type="checkbox" id="selectAllKb" onclick="toggleSelectAll()"></th>
-                                    <th style="width: 100px">Type</th>
-                                    <th>Content / SQL</th>
-                                    <th style="width: 25%">Related Question</th>
-                                    <th style="width: 100px" class="text-center">Actions</th>
+                                    <th style="width: 100px">类型</th>
+                                    <th>内容 / SQL</th>
+                                    <th style="width: 25%">相关问题</th>
+                                    <th style="width: 100px" class="text-center">操作</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr><td colspan="5" class="text-center p-5 text-muted">Loading...</td></tr>
+                                <tr><td colspan="5" class="text-center p-5 text-muted">加载中...</td></tr>
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <!-- 数据源管理页面 -->
+            <div id="dsView" class="ds-view">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h5 class="mb-0 fw-bold">数据源管理</h5>
+                    <button class="btn btn-sm btn-success rounded-pill px-3" onclick="showDsModal()">
+                        <i class="bi bi-plus-lg me-1"></i>新增数据源
+                    </button>
+                </div>
+                <div id="dsList">
+                    <div class="text-center p-5 text-muted">加载中...</div>
+                </div>
+            </div>
+
+            <!-- 知识库管理页面 -->
+            <div id="kbmView" class="kb-view">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h5 class="mb-0 fw-bold">知识库管理</h5>
+                    <button class="btn btn-sm btn-success rounded-pill px-3" onclick="showKbmModal()">
+                        <i class="bi bi-plus-lg me-1"></i>新建知识库
+                    </button>
+                </div>
+                <div id="kbmList">
+                    <div class="text-center p-5 text-muted">加载中...</div>
                 </div>
             </div>
         </div>
@@ -585,30 +902,284 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
                 <div class="modal-header border-bottom-0 pb-0">
-                    <h5 class="modal-title fw-bold">Add Training Data</h5>
+                    <h5 class="modal-title fw-bold">添加训练数据</h5>
                     <button type="button" class="btn-close" onclick="hideAddModal()"></button>
                 </div>
                 <div class="modal-body pt-4">
                     <div class="mb-3">
-                        <label class="form-label small fw-bold text-muted">DATA TYPE</label>
+                        <label class="form-label small fw-bold text-muted">数据类型</label>
                         <select class="form-select" id="addType" onchange="toggleAddFields()">
-                            <option value="documentation">Documentation</option>
-                            <option value="sql">SQL (QA Pair)</option>
-                            <option value="ddl">DDL (Schema)</option>
+                            <option value="documentation">文档说明</option>
+                            <option value="sql">SQL (问答对)</option>
+                            <option value="ddl">DDL (表结构)</option>
                         </select>
                     </div>
                     <div class="mb-3" id="questionGroup" style="display:none;">
-                        <label class="form-label small fw-bold text-muted">QUESTION</label>
-                        <input type="text" class="form-control bg-light" id="addQuestion" placeholder="e.g. How many users?">
+                        <label class="form-label small fw-bold text-muted">问题示例</label>
+                        <input type="text" class="form-control bg-light" id="addQuestion" placeholder="例如: 查询本月的用户数量">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label small fw-bold text-muted" id="contentLabel">CONTENT</label>
+                        <label class="form-label small fw-bold text-muted" id="contentLabel">内容</label>
                         <textarea class="form-control bg-light" id="addContent" rows="6" style="font-family: monospace; font-size: 13px;"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer border-top-0">
-                    <button type="button" class="btn btn-light rounded-pill px-4" onclick="hideAddModal()">Cancel</button>
-                    <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="submitData()">Save Data</button>
+                    <button type="button" class="btn btn-light rounded-pill px-4" onclick="hideAddModal()">取消</button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="submitData()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据源管理弹窗 -->
+    <div class="modal fade" id="dsModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold" id="dsModalTitle">新增数据源</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body pt-4">
+                    <input type="hidden" id="dsEditId">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="dsName" maxlength="20" placeholder="例如: 生产环境数据库">
+                        <small class="text-muted">20字以内</small>
+                    </div>
+                    <div class="row">
+                        <div class="col-8">
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold text-muted">主机地址 <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="dsHost" placeholder="例如: 10.18.40.29">
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold text-muted">端口 <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="dsPort" value="3306">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">用户名 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="dsUser" placeholder="例如: root">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">密码 <span class="text-danger">*</span></label>
+                        <input type="password" class="form-control" id="dsPassword" placeholder="输入密码">
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="dsSsl" checked>
+                        <label class="form-check-label" for="dsSsl">启用 SSL</label>
+                    </div>
+                    <div id="dsTestResult" class="alert d-none" role="alert"></div>
+                    <!-- 数据库选择区域（测试连接成功后显示） -->
+                    <div id="dsDatabaseSection" class="d-none">
+                        <hr class="my-3">
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-muted">选择数据库（可多选）</label>
+                            <div id="dsDatabaseList" class="border rounded p-2" style="max-height: 180px; overflow-y: auto;">
+                                <div class="text-muted small">请先测试连接</div>
+                            </div>
+                            <small class="text-muted">勾选要纳入管理的数据库</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold text-muted">默认数据库</label>
+                            <select class="form-select" id="dsDefaultDatabase">
+                                <option value="">不设置默认数据库</option>
+                            </select>
+                            <small class="text-muted">执行SQL时默认使用的数据库</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-outline-secondary rounded-pill px-4" onclick="testDsConnection()">
+                        <i class="bi bi-plug me-1"></i>测试连接
+                    </button>
+                    <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="saveDatasource()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 知识库管理弹窗 -->
+    <div class="modal fade" id="kbmModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold" id="kbmModalTitle">新建知识库</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body pt-4">
+                    <input type="hidden" id="kbmEditId">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">知识库名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="kbmName" placeholder="例如: ES业务知识库">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">描述</label>
+                        <textarea class="form-control" id="kbmDescription" rows="3" placeholder="知识库用途说明（可选）"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">关联数据源（可多选）</label>
+                        <div id="kbmDatasourceList" class="border rounded p-2" style="max-height: 150px; overflow-y: auto;">
+                            <div class="text-muted small">加载中...</div>
+                        </div>
+                        <small class="text-muted">选择此知识库可用于哪些数据源</small>
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="saveKnowledgeBase()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 知识库上传训练文件弹窗 -->
+    <div class="modal fade" id="kbmUploadModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold">上传训练语料</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body pt-4">
+                    <input type="hidden" id="uploadKbId">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">选择CSV文件</label>
+                        <input type="file" class="form-control" id="uploadFile" accept=".csv">
+                        <small class="text-muted">CSV格式，包含列：类型(ddl/sql/documentation)、内容、用户问题示例（SQL类型必填）</small>
+                    </div>
+                    <div id="uploadProgress" class="d-none">
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <small class="text-muted mt-2 d-block" id="uploadStatus"></small>
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="uploadAndTrain()">
+                        <i class="bi bi-upload me-1"></i>上传并训练
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI语料生成器弹窗 -->
+    <div class="modal fade" id="corpusEditorModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold">AI语料生成器</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body pt-4">
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="badge bg-info me-2" id="corpusDatasourceName">数据源</span>
+                                <span class="badge bg-secondary me-2">表数量: <span id="corpusTableCount">0</span></span>
+                                <span class="badge bg-primary">生成语料: <span id="corpusTotalCount">0</span>条</span>
+                            </div>
+                            <div>
+                                <button class="btn btn-sm btn-outline-primary" onclick="addNewCorpusItem()">
+                                    <i class="bi bi-plus-lg me-1"></i>新增语料
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="btn-group" role="group">
+                            <input type="radio" class="btn-check" name="corpusFilter" id="filterAll" value="all" checked onchange="filterCorpus()">
+                            <label class="btn btn-outline-secondary btn-sm" for="filterAll">全部</label>
+                            
+                            <input type="radio" class="btn-check" name="corpusFilter" id="filterDDL" value="ddl" onchange="filterCorpus()">
+                            <label class="btn btn-outline-secondary btn-sm" for="filterDDL">DDL</label>
+                            
+                            <input type="radio" class="btn-check" name="corpusFilter" id="filterSQL" value="sql" onchange="filterCorpus()">
+                            <label class="btn btn-outline-secondary btn-sm" for="filterSQL">SQL</label>
+                            
+                            <input type="radio" class="btn-check" name="corpusFilter" id="filterDoc" value="documentation" onchange="filterCorpus()">
+                            <label class="btn btn-outline-secondary btn-sm" for="filterDoc">文档</label>
+                        </div>
+                    </div>
+                    <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                        <table class="table table-hover">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width: 80px;">类型</th>
+                                    <th style="width: 30%;">内容</th>
+                                    <th style="width: 25%;">问题示例</th>
+                                    <th style="width: 15%;">标签</th>
+                                    <th style="width: 100px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="corpusTableBody">
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted p-5">
+                                        <div class="spinner-border text-primary" role="status"></div>
+                                        <div class="mt-2">正在生成语料...</div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <hr class="my-3">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">目标知识库</label>
+                        <select class="form-select" id="corpusTargetKb">
+                            <option value="">请选择知识库</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="importCorpusToKnowledgeBase()">
+                        <i class="bi bi-upload me-1"></i>确认导入 (<span id="corpusSelectedCount">0</span>条)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑单条语料弹窗 -->
+    <div class="modal fade" id="corpusItemModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold">编辑语料</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body pt-4">
+                    <input type="hidden" id="corpusItemIndex">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">类型 <span class="text-danger">*</span></label>
+                        <select class="form-select" id="corpusItemType" onchange="onCorpusItemTypeChange()">
+                            <option value="ddl">DDL</option>
+                            <option value="sql">SQL</option>
+                            <option value="documentation">Documentation</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">内容 <span class="text-danger">*</span></label>
+                        <textarea class="form-control" id="corpusItemContent" rows="8" placeholder="输入语料内容"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">用户问题示例 <span id="corpusQuestionRequired" class="text-danger">(SQL类型必填)</span></label>
+                        <input type="text" class="form-control" id="corpusItemQuestion" placeholder="输入用户可能问的问题">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-muted">业务标签</label>
+                        <input type="text" class="form-control" id="corpusItemTags" placeholder="例如: 用户表,字段说明">
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="saveCorpusItem()">保存</button>
                 </div>
             </div>
         </div>
@@ -661,8 +1232,15 @@
         let APP_CONFIG = { show_sql: false };
         let CHAT_HISTORY = {};
         let CHART_INSTANCES = {};
+        let PINNED_ITEMS = {};
         let currentSessionId = null;
         let KB_DATA = [];
+        let DS_DATA = [];  // 数据源列表
+        let KBM_DATA = []; // 知识库列表
+        let currentDatasourceId = null;
+        let currentKbId = null;
+        let managingKbId = null;  // 当前正在管理训练数据的知识库ID
+        let managingKbName = null;  // 当前正在管理训练数据的知识库名称
         const TOKEN_KEY = 'auth_token';
 
         window.onload = async () => {
@@ -775,6 +1353,10 @@
                 headers['Authorization'] = `Bearer ${token}`;
             }
             const res = await fetch(url, {...options, headers});
+            const refreshedToken = res.headers.get('X-Auth-Token') || res.headers.get('x-auth-token');
+            if (refreshedToken) {
+                setToken(refreshedToken);
+            }
             if (res.status === 401) {
                 clearToken();
                 showLoginPage('登录已过期，请重新登录');
@@ -785,6 +1367,7 @@
 
         async function initializeApp() {
             await loadSessions();
+            await loadChatSelectors();  // 加载数据源和知识库选择器
             const sessionsList = document.querySelectorAll('.session-item');
             if (sessionsList.length > 0) {
                 createNewSession();
@@ -792,11 +1375,391 @@
                 createNewSession();
             }
         }
+        
+        // 加载Chat界面的数据源和知识库选择器
+        async function loadChatSelectors() {
+            try {
+                // 加载数据源
+                const dsRes = await authFetch('/api/v0/datasources');
+                DS_DATA = await dsRes.json();
+                const dsSelect = document.getElementById('chatDatasource');
+                dsSelect.innerHTML = '<option value="">默认数据源</option>';
+                DS_DATA.forEach(ds => {
+                    dsSelect.innerHTML += `<option value="${ds.id}">${ds.name} (${ds.host})</option>`;
+                });
+                
+                // 加载知识库
+                const kbRes = await authFetch('/api/v0/knowledge_bases');
+                KBM_DATA = await kbRes.json();
+                const kbSelect = document.getElementById('chatKnowledgeBase');
+                kbSelect.innerHTML = '<option value="">默认知识库</option>';
+                KBM_DATA.forEach(kb => {
+                    kbSelect.innerHTML += `<option value="${kb.id}">${kb.name}</option>`;
+                });
+            } catch(e) {
+                console.error("Failed to load selectors", e);
+            }
+        }
+        
+        function onDatasourceChange() {
+            currentDatasourceId = document.getElementById('chatDatasource').value || null;
+            console.log('Selected datasource:', currentDatasourceId);
+        }
+        
+        function onKnowledgeBaseChange() {
+            currentKbId = document.getElementById('chatKnowledgeBase').value || null;
+            console.log('Selected knowledge base:', currentKbId);
+            
+            const dsSelect = document.getElementById('chatDatasource');
+            const dsContainer = dsSelect.parentElement;
+            
+            if (!currentKbId) {
+                // 未选择知识库，显示所有数据源
+                dsContainer.style.display = '';
+                updateDatasourceOptions(null);
+                return;
+            }
+            
+            // 查找选中的知识库
+            const selectedKb = KBM_DATA.find(kb => kb.id === currentKbId);
+            const dsIds = selectedKb?.datasource_ids || [];
+            
+            if (dsIds.length === 0) {
+                // 知识库未关联数据源，显示所有数据源
+                dsContainer.style.display = '';
+                updateDatasourceOptions(null);
+            } else if (dsIds.length === 1) {
+                // 只关联一个数据源，自动选中并隐藏选择器
+                dsContainer.style.display = 'none';
+                currentDatasourceId = dsIds[0];
+                dsSelect.value = dsIds[0];
+                console.log('Auto-selected datasource:', currentDatasourceId);
+            } else {
+                // 关联多个数据源，只显示关联的数据源
+                dsContainer.style.display = '';
+                updateDatasourceOptions(dsIds);
+            }
+        }
+        
+        function updateDatasourceOptions(filterIds) {
+            const dsSelect = document.getElementById('chatDatasource');
+            dsSelect.innerHTML = '<option value="">请选择数据源</option>';
+            
+            const filteredDS = filterIds 
+                ? DS_DATA.filter(ds => filterIds.includes(ds.id))
+                : DS_DATA;
+            
+            filteredDS.forEach(ds => {
+                dsSelect.innerHTML += `<option value="${ds.id}">${ds.name} (${ds.host})</option>`;
+            });
+            
+            // 如果当前选中的数据源不在过滤列表中，清空选择
+            if (filterIds && currentDatasourceId && !filterIds.includes(currentDatasourceId)) {
+                currentDatasourceId = null;
+                dsSelect.value = '';
+            }
+        }
 
         function switchView(view) {
             document.getElementById('chatView').style.display = view === 'chat' ? 'flex' : 'none';
             document.getElementById('kbView').classList.toggle('active', view === 'kb');
+            document.getElementById('dsView').classList.toggle('active', view === 'ds');
+            document.getElementById('kbmView').classList.toggle('active', view === 'kbm');
+            document.getElementById('analyticsView').classList.toggle('active', view === 'analytics');
+            
             if(view === 'kb') loadKnowledgeBase();
+            if(view === 'ds') loadDatasources();
+            if(view === 'kbm') loadKnowledgeBases();
+            if(view === 'analytics') refreshAnalytics();
+        }
+
+        async function refreshAnalytics() {
+            await Promise.all([
+                loadAnalyticsMetrics(),
+                loadPinnedCharts(),
+                loadInsights()
+            ]);
+            authFetch('/api/v0/analytics/refresh', { method: 'POST' })
+                .then(() => loadPinnedCharts())
+                .catch(e => console.warn('Analytics refresh failed', e));
+        }
+
+        async function loadAnalyticsMetrics() {
+            const container = document.getElementById('analyticsMetrics');
+            try {
+                const res = await authFetch('/api/v0/analytics/metrics');
+                const metrics = await res.json();
+                container.innerHTML = `
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">数据更新</div>
+                        <div class="metric-value">${metrics.data_freshness || '--'}</div>
+                    </div>
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">AI 准确率</div>
+                        <div class="metric-value">${metrics.ai_accuracy || 0}%</div>
+                    </div>
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">平均延迟</div>
+                        <div class="metric-value">${metrics.avg_latency_ms || 0}ms</div>
+                    </div>
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">今日查询</div>
+                        <div class="metric-value">${metrics.total_queries_today || 0}</div>
+                    </div>
+                `;
+            } catch (e) {
+                console.error('Failed to load metrics', e);
+                container.innerHTML = `
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">数据更新</div>
+                        <div class="metric-value">--</div>
+                    </div>
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">AI 准确率</div>
+                        <div class="metric-value">--</div>
+                    </div>
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">平均延迟</div>
+                        <div class="metric-value">--</div>
+                    </div>
+                    <div class="analytics-metric-card">
+                        <div class="metric-label">今日查询</div>
+                        <div class="metric-value">--</div>
+                    </div>
+                `;
+            }
+        }
+
+        async function loadPinnedCharts() {
+            const container = document.getElementById('pinnedGrid');
+            container.innerHTML = '<div class="pinned-placeholder">加载中...</div>';
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                const res = await authFetch('/api/v0/analytics/pinned?refresh=false', { signal: controller.signal });
+                clearTimeout(timeoutId);
+                const data = await res.json();
+                const items = data.items || [];
+                updatePinnedItems(items);
+                if (items.length === 0) {
+                    container.innerHTML = '<div class="pinned-placeholder">从对话中点击 📌 Pin，即可加入看板</div>';
+                    return;
+                }
+                container.innerHTML = items.map(item => `
+                    <div class="pinned-card">
+                        <div class="pinned-card-header">
+                            <span>${item.question || '收藏图表'}</span>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="refreshPinnedChart('${item.message_id}')">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                        </div>
+                        <div id="pinned-chart-${item.message_id}" class="pinned-chart"></div>
+                        <div class="text-muted small mt-2">刷新于 ${item.last_refreshed || '--'}</div>
+                    </div>
+                `).join('');
+
+                items.forEach(item => {
+                    const chartContainer = document.getElementById(`pinned-chart-${item.message_id}`);
+                    if (!chartContainer) return;
+                    const hasData = Array.isArray(item.result) && item.result.length > 0
+                        && Array.isArray(item.columns) && item.columns.length > 0;
+                    let chartRendered = false;
+                    if (hasData) {
+                        try {
+                            renderG2PlotChart(chartContainer, item.result, item.columns, `pinned-${item.message_id}`);
+                            chartRendered = true;
+                        } catch (e) {
+                            console.warn('Pinned G2Plot render failed:', e);
+                        }
+                    }
+                    if (!chartRendered && hasData) {
+                        try {
+                            renderECharts(chartContainer, null, item.result, item.columns, `pinned-${item.message_id}`);
+                            chartRendered = true;
+                        } catch (e) {
+                            console.warn('Pinned ECharts render failed:', e);
+                        }
+                    }
+                    if (!chartRendered && item.chart) {
+                        try {
+                            renderPlotlyChart(chartContainer, item.chart, `pinned-${item.message_id}`);
+                            chartRendered = true;
+                        } catch (e) {
+                            console.warn('Pinned Plotly render failed:', e);
+                        }
+                    }
+                    if (!chartRendered) {
+                        chartContainer.innerHTML = '<div class="text-muted small text-center p-3">暂无图表数据</div>';
+                    }
+                });
+            } catch (e) {
+                console.error('Failed to load pinned charts', e);
+                container.innerHTML = '<div class="pinned-placeholder">加载失败，请点击刷新重试</div>';
+            }
+        }
+
+        async function loadInsights() {
+            const container = document.getElementById('insightsGrid');
+            container.innerHTML = '<div class="insight-placeholder">加载中...</div>';
+            try {
+                const res = await authFetch('/api/v0/analytics/insights');
+                const data = await res.json();
+                const items = data.items || [];
+                if (items.length === 0) {
+                    container.innerHTML = '<div class="insight-placeholder">暂无洞察数据</div>';
+                    return;
+                }
+                container.innerHTML = items.map(item => {
+                    const evidenceId = `insight-evidence-${(item.created_at || '').replace(/[^0-9]/g, '')}`;
+                    const category = (item.category || 'trend').toUpperCase();
+                    const severity = (item.severity || 'info').toUpperCase();
+                    const confidence = typeof item.confidence === 'number' ? `${Math.round(item.confidence * 100)}%` : '--';
+                    const evidence = item.data || {};
+                    const sql = evidence.sql ? escapeHtml(evidence.sql) : '';
+                    const metric = typeof evidence.change_ratio === 'number'
+                        ? `${(evidence.change_ratio * 100).toFixed(1)}%`
+                        : '--';
+                    const deleteButton = item.id
+                        ? `<button class="btn btn-sm btn-outline-danger mt-2 ms-2" onclick="deleteInsight('${item.id}')">删除</button>`
+                        : '';
+                    return `
+                        <div class="insight-card">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="insight-title">${item.title || '洞察'}</div>
+                                <span class="badge bg-light text-dark border">${category}</span>
+                            </div>
+                            <div class="insight-message">${item.message || ''}</div>
+                            <div class="d-flex align-items-center gap-2 mt-2 text-muted small">
+                                <span>${severity}</span>
+                                <span>· 置信度 ${confidence}</span>
+                            </div>
+                            <div class="text-muted small mt-2">${item.created_at || ''}</div>
+                            <div class="d-flex align-items-center">
+                                <button class="btn btn-sm btn-outline-secondary mt-2" onclick="toggleInsightEvidence('${evidenceId}')">查看证据</button>
+                                ${deleteButton}
+                            </div>
+                            <div id="${evidenceId}" class="mt-2" style="display:none;">
+                                <div class="text-muted small mb-1">变化幅度: ${metric}</div>
+                                ${sql ? `<pre class="sql-block" style="white-space: pre-wrap;">${sql}</pre>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error('Failed to load insights', e);
+                container.innerHTML = '<div class="insight-placeholder">加载失败</div>';
+            }
+        }
+
+        function toggleInsightEvidence(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function clearInsights() {
+            if (!confirm('确认清空所有洞察卡片？')) return;
+            try {
+                await authFetch('/api/v0/analytics/insights/clear', { method: 'POST' });
+                await loadInsights();
+            } catch (e) {
+                console.error('Clear insights failed', e);
+                alert('清空失败');
+            }
+        }
+
+        async function deleteInsight(insightId) {
+            if (!confirm('确认删除该洞察？')) return;
+            try {
+                await authFetch(`/api/v0/analytics/insights/${insightId}`, { method: 'DELETE' });
+                await loadInsights();
+            } catch (e) {
+                console.error('Delete insight failed', e);
+                alert('删除失败');
+            }
+        }
+
+        function escapeHtml(value) {
+            if (value === null || value === undefined) return '';
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        async function refreshPinnedChart(messageId) {
+            try {
+                await authFetch(`/api/v0/analytics/pinned/${messageId}/refresh`, { method: 'POST' });
+                await loadPinnedCharts();
+            } catch (e) {
+                console.error('Failed to refresh pinned chart', e);
+            }
+        }
+
+        function updatePinnedItems(items) {
+            PINNED_ITEMS = {};
+            items.forEach(item => {
+                PINNED_ITEMS[item.message_id] = item;
+                const targetId = CHAT_HISTORY[item.message_id] ? item.message_id : null;
+                if (targetId) {
+                    CHAT_HISTORY[targetId].pinned = true;
+                } else {
+                    Object.keys(CHAT_HISTORY).forEach(id => {
+                        if (CHAT_HISTORY[id]?.serverMessageId === item.message_id) {
+                            CHAT_HISTORY[id].pinned = true;
+                        }
+                    });
+                }
+            });
+            Object.keys(CHAT_HISTORY).forEach(id => {
+                const serverId = CHAT_HISTORY[id]?.serverMessageId;
+                if (serverId && !PINNED_ITEMS[serverId]) {
+                    CHAT_HISTORY[id].pinned = false;
+                }
+            });
+            document.querySelectorAll('[data-pin-id]').forEach(btn => {
+                const id = btn.getAttribute('data-pin-id');
+                const pinned = CHAT_HISTORY[id]?.pinned;
+                updatePinButtonState(btn, pinned);
+            });
+        }
+
+        function updatePinButtonState(btnElement, isPinned) {
+            if (!btnElement) return;
+            btnElement.classList.toggle('active-pin', Boolean(isPinned));
+            btnElement.innerHTML = isPinned
+                ? '<i class="bi bi-pin-angle-fill"></i> Pinned'
+                : '<i class="bi bi-pin-angle"></i> Pin';
+        }
+
+        async function togglePin(msgId, btnElement) {
+            const data = CHAT_HISTORY[msgId];
+            if (!data || !data.hasChart) {
+                alert('该消息没有可收藏的图表');
+                return;
+            }
+            if (!data.serverMessageId) {
+                alert('该消息尚未同步到服务器，无法收藏');
+                return;
+            }
+            btnElement.disabled = true;
+            try {
+                if (data.pinned) {
+                    const res = await authFetch(`/api/v0/messages/${data.serverMessageId}/pin`, { method: 'DELETE' });
+                    const result = await res.json();
+                    updatePinnedItems(result.items || []);
+                    await loadPinnedCharts();
+                } else {
+                    const res = await authFetch(`/api/v0/messages/${data.serverMessageId}/pin`, { method: 'POST' });
+                    const result = await res.json();
+                    updatePinnedItems(result.items || []);
+                    await loadPinnedCharts();
+                }
+            } catch (e) {
+                console.error('Pin error', e);
+            } finally {
+                btnElement.disabled = false;
+            }
         }
 
         function toggleSidebar() {
@@ -841,6 +1804,7 @@
 
         async function selectSession(sessionId) {
             if (currentSessionId === sessionId) return;
+            switchView('chat');
             currentSessionId = sessionId;
             document.querySelectorAll('.session-item').forEach(el => {
                 el.classList.toggle('active', el.dataset.id === sessionId);
@@ -894,7 +1858,9 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         question,
-                        session_id: currentSessionId
+                        session_id: currentSessionId,
+                        datasource_id: currentDatasourceId,
+                        kb_id: currentKbId
                     })
                 });
 
@@ -914,14 +1880,18 @@
                 if (sqlData.is_sql) {
                     const explanation = sqlData.explanation || "Here are the results:";
                     const displayStyle = APP_CONFIG.show_sql ? 'block' : 'none';
-                    const msgId = 'msg-' + Date.now();
+                    const msgId = sqlData.message_id || ('msg-' + Date.now());
                     const intent = sqlData.intent || null;
 
                     CHAT_HISTORY[msgId] = {
+                        serverMessageId: sqlData.message_id || null,
                         question: question,
                         sql: sqlData.sql,
                         explanation: explanation,
-                        intent: intent
+                        intent: intent,
+                        hasChart: false,
+                        pinned: false,
+                        feedbackType: null
                     };
 
                     loadingDiv.innerHTML = `
@@ -961,6 +1931,7 @@
                     }
                     const columns = runData.columns || [];
                     const result = runData.result || [];
+                    CHAT_HISTORY[msgId].hasChart = Boolean(runData?.chart) || (columns.length > 0 && result.length > 0);
                     
                     const tableHtml = buildResultTable(columns, result);
                     
@@ -994,29 +1965,48 @@
                             </div>
                             
                             <div class="feedback-actions">
-                                <button class="feedback-btn" onclick="submitFeedback('${msgId}', 'up', this)"><i class="bi bi-hand-thumbs-up"></i> Helpful</button>
-                                <button class="feedback-btn" onclick="submitFeedback('${msgId}', 'down', this)"><i class="bi bi-hand-thumbs-down"></i> Not Helpful</button>
+                                <button class="feedback-btn" data-pin-id="${msgId}" onclick="togglePin('${msgId}', this)"><i class="bi bi-pin-angle"></i> Pin</button>
+                                <button class="feedback-btn" data-feedback-type="up" onclick="submitFeedback('${msgId}', 'up', this)"><i class="bi bi-hand-thumbs-up"></i> Helpful</button>
+                                <button class="feedback-btn" data-feedback-type="down" onclick="submitFeedback('${msgId}', 'down', this)"><i class="bi bi-hand-thumbs-down"></i> Not Helpful</button>
                             </div>
                         </div>
                     `;
                     
                     // 【关键修复】如果是明细意图，不显示图表区域
                     const isDetailIntent = runData?.intent?.intent === 'detail';
-                    if (!isDetailIntent && ((result && result.length > 0 && columns && columns.length > 0) || runData?.chart)) {
+                    const hasData = result && result.length > 0 && columns && columns.length > 0;
+                    const hasPlotly = Boolean(runData?.chart);
+                    if (!isDetailIntent && (hasData || hasPlotly)) {
                         try {
                             const chartCard = document.getElementById(`chart-card-${msgId}`);
                             const chartContainer = document.getElementById(`chart-container-${msgId}`);
                             chartCard.style.display = 'block';
-                            try {
-                                if (runData?.chart) {
-                                    renderPlotlyChart(chartContainer, runData.chart, msgId);
-                                } else {
-                                    renderECharts(chartContainer, null, result, columns, msgId, runData?.intent);
+                            let chartRendered = false;
+                            if (hasData) {
+                                try {
+                                    renderG2PlotChart(chartContainer, result, columns, msgId, runData?.intent);
+                                    chartRendered = true;
+                                } catch (chartError) {
+                                    console.warn("G2Plot render failed:", chartError);
                                 }
-                            } catch (chartError) {
-                                console.warn("Chart render failed:", chartError);
-                                chartCard.style.display = 'none';
                             }
+                            if (!chartRendered && hasData) {
+                                try {
+                                    renderECharts(chartContainer, null, result, columns, msgId, runData?.intent);
+                                    chartRendered = true;
+                                } catch (chartError) {
+                                    console.warn("ECharts render failed:", chartError);
+                                }
+                            }
+                            if (!chartRendered && hasPlotly) {
+                                try {
+                                    renderPlotlyChart(chartContainer, runData.chart, msgId);
+                                    chartRendered = true;
+                                } catch (chartError) {
+                                    console.warn("Plotly render failed:", chartError);
+                                }
+                            }
+                            if (!chartRendered) chartCard.style.display = 'none';
                         } catch (e) {
                             console.error("Chart render error", e);
                         }
@@ -1066,7 +2056,11 @@
                     question: question,
                     sql: msg.sql || '',
                     explanation: explanation,
-                    intent: msg.intent || null
+                    intent: msg.intent || null,
+                    hasChart: Boolean(msg.chart) || (Array.isArray(msg.result) && msg.result.length > 0),
+                    pinned: Boolean(msg.pinned),
+                    feedbackType: msg.feedback_type || null,
+                    serverMessageId: msg.id || msgId
                 };
                 appendAssistantDataMessage({
                     msgId,
@@ -1125,6 +2119,28 @@
             return tableHtml;
         }
 
+        function applyFeedbackButtonState(container, feedbackType) {
+            if (!container) return;
+            const buttons = container.querySelectorAll('.feedback-btn');
+            buttons.forEach(btn => {
+                if (btn.hasAttribute('data-pin-id')) return;
+                btn.classList.remove('active-up', 'active-down');
+                btn.disabled = false;
+            });
+            if (!feedbackType) return;
+            buttons.forEach(btn => {
+                if (btn.hasAttribute('data-pin-id')) return;
+                const btnType = btn.getAttribute('data-feedback-type');
+                if (feedbackType === 'up' && btnType === 'up') {
+                    btn.classList.add('active-up');
+                }
+                if (feedbackType === 'down' && btnType === 'down') {
+                    btn.classList.add('active-down');
+                }
+                btn.disabled = true;
+            });
+        }
+
         function appendAssistantDataMessage({msgId, explanation, sql, result, columns, chart, intent}) {
             const chatBox = document.getElementById('chatBox');
             const displayStyle = APP_CONFIG.show_sql ? 'block' : 'none';
@@ -1160,32 +2176,56 @@
                         ${tableHtml}
                     </div>
                     <div class="feedback-actions">
-                        <button class="feedback-btn" onclick="submitFeedback('${msgId}', 'up', this)"><i class="bi bi-hand-thumbs-up"></i> Helpful</button>
-                        <button class="feedback-btn" onclick="submitFeedback('${msgId}', 'down', this)"><i class="bi bi-hand-thumbs-down"></i> Not Helpful</button>
+                        <button class="feedback-btn" data-pin-id="${msgId}" onclick="togglePin('${msgId}', this)"><i class="bi bi-pin-angle"></i> Pin</button>
+                        <button class="feedback-btn" data-feedback-type="up" onclick="submitFeedback('${msgId}', 'up', this)"><i class="bi bi-hand-thumbs-up"></i> Helpful</button>
+                        <button class="feedback-btn" data-feedback-type="down" onclick="submitFeedback('${msgId}', 'down', this)"><i class="bi bi-hand-thumbs-down"></i> Not Helpful</button>
                     </div>
                 </div>
             `;
 
             chatBox.appendChild(div);
             chatBox.scrollTop = chatBox.scrollHeight;
+            const pinBtn = div.querySelector(`[data-pin-id="${msgId}"]`);
+            if (pinBtn) {
+                updatePinButtonState(pinBtn, CHAT_HISTORY[msgId]?.pinned);
+            }
+            applyFeedbackButtonState(div, CHAT_HISTORY[msgId]?.feedbackType);
 
             // 【关键修复】如果是明细意图，不显示图表区域
             const isDetailIntent = intent?.intent === 'detail';
-            if (!isDetailIntent && ((safeResult.length > 0 && safeColumns.length > 0) || chart)) {
+            const hasData = safeResult.length > 0 && safeColumns.length > 0;
+            const hasPlotly = Boolean(chart);
+            if (!isDetailIntent && (hasData || hasPlotly)) {
                 try {
                     const chartCard = document.getElementById(`chart-card-${msgId}`);
                     const chartContainer = document.getElementById(`chart-container-${msgId}`);
                     chartCard.style.display = 'block';
-                    try {
-                        if (chart) {
-                            renderPlotlyChart(chartContainer, chart, msgId);
-                        } else {
-                            renderECharts(chartContainer, null, safeResult, safeColumns, msgId, intent);
+                    let chartRendered = false;
+                    if (hasData) {
+                        try {
+                            renderG2PlotChart(chartContainer, safeResult, safeColumns, msgId, intent);
+                            chartRendered = true;
+                        } catch (chartError) {
+                            console.warn("G2Plot render failed:", chartError);
                         }
-                    } catch (chartError) {
-                        console.warn("Chart render failed:", chartError);
-                        chartCard.style.display = 'none';
                     }
+                    if (!chartRendered && hasData) {
+                        try {
+                            renderECharts(chartContainer, null, safeResult, safeColumns, msgId, intent);
+                            chartRendered = true;
+                        } catch (chartError) {
+                            console.warn("ECharts render failed:", chartError);
+                        }
+                    }
+                    if (!chartRendered && hasPlotly) {
+                        try {
+                            renderPlotlyChart(chartContainer, chart, msgId);
+                            chartRendered = true;
+                        } catch (chartError) {
+                            console.warn("Plotly render failed:", chartError);
+                        }
+                    }
+                    if (!chartRendered) chartCard.style.display = 'none';
                 } catch (e) {
                     console.error("Chart render error", e);
                 }
@@ -1195,6 +2235,98 @@
                 if (chartCard) chartCard.style.display = 'none';
                 console.log('[DEBUG] 明细意图（历史记录），不显示图表');
             }
+        }
+
+        function renderG2PlotChart(container, resultData, columns, msgId, intent) {
+            if (!window.G2Plot) throw new Error('G2Plot not loaded');
+            if (!resultData || resultData.length === 0 || !columns || columns.length === 0) throw new Error('No data');
+            const columnTypes = detectColumnTypes(resultData, columns);
+            const chartType = detectChartType(resultData, columns, columnTypes, intent);
+            const xColumn = columns[0];
+            let yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
+            if (yColumns.length === 0) yColumns = columns.slice(1);
+
+            const formatXAxisValue = (val) => {
+                if (val === null || val === undefined) return '';
+                let str = String(val);
+                if (str.match(/^\d{8}$/) || str.match(/^\d{6}$/)) str = formatDate(str);
+                if (str.length > 20) return str.substring(0, 20) + '...';
+                return str;
+            };
+
+            let chart = null;
+            container.style.height = '400px';
+
+            if (chartType === 'line-long-format') {
+                const longFormat = isLongFormatTimeSeries(resultData, columns);
+                if (longFormat) {
+                    const data = resultData.map(row => ({
+                        [longFormat.dateCol]: formatXAxisValue(row[longFormat.dateCol]),
+                        [longFormat.categoryCol]: String(row[longFormat.categoryCol]),
+                        [longFormat.valueCol]: Number(row[longFormat.valueCol]) || 0
+                    }));
+                    chart = new G2Plot.Line(container, {
+                        data,
+                        xField: longFormat.dateCol,
+                        yField: longFormat.valueCol,
+                        seriesField: longFormat.categoryCol,
+                        smooth: true,
+                        legend: { position: 'top' }
+                    });
+                }
+            } else if (chartType === 'pie') {
+                const valueCol = yColumns[0];
+                const data = resultData.map(row => ({
+                    category: String(row[xColumn]),
+                    value: Number(row[valueCol]) || 0
+                }));
+                chart = new G2Plot.Pie(container, {
+                    data,
+                    angleField: 'value',
+                    colorField: 'category',
+                    radius: 0.8,
+                    innerRadius: 0.5,
+                    label: { type: 'outer', content: '{name} {percentage}' },
+                    legend: { position: 'right' }
+                });
+            } else {
+                const isLine = chartType === 'line';
+                const baseData = resultData.map(row => ({
+                    x: formatXAxisValue(row[xColumn]),
+                    row
+                }));
+
+                let data = [];
+                if (yColumns.length === 1) {
+                    const yCol = yColumns[0];
+                    data = baseData.map(item => ({
+                        x: item.x,
+                        y: Number(item.row[yCol]) || 0
+                    }));
+                    chart = isLine
+                        ? new G2Plot.Line(container, { data, xField: 'x', yField: 'y', smooth: true })
+                        : new G2Plot.Column(container, { data, xField: 'x', yField: 'y' });
+                } else {
+                    yColumns.forEach(yCol => {
+                        baseData.forEach(item => {
+                            data.push({
+                                x: item.x,
+                                y: Number(item.row[yCol]) || 0,
+                                series: yCol
+                            });
+                        });
+                    });
+                    chart = isLine
+                        ? new G2Plot.Line(container, { data, xField: 'x', yField: 'y', seriesField: 'series', smooth: true })
+                        : new G2Plot.Column(container, { data, xField: 'x', yField: 'y', seriesField: 'series', isGroup: true });
+                }
+            }
+
+            if (!chart) throw new Error('G2Plot chart not created');
+            chart.render();
+            CHART_INSTANCES[msgId] = { type: 'g2plot', chart };
+            window.addEventListener('resize', () => chart.forceFit && chart.forceFit());
+            return chart;
         }
 
         function renderECharts(container, chartJsonStr, resultData, columns, msgId, intent) {
@@ -1396,25 +2528,58 @@
             };
         }
         
+        // 打开知识库的训练数据管理页面
+        function manageKbTrainingData(kbId, kbName) {
+            managingKbId = kbId;
+            managingKbName = kbName;
+            
+            // 更新标题
+            document.getElementById('kbViewTitle').textContent = '训练数据管理';
+            document.getElementById('kbViewSubtitle').textContent = `- ${kbName}`;
+            
+            // 切换到训练数据视图
+            switchView('kb');
+        }
+        
         async function loadKnowledgeBase() {
              const tbody = document.querySelector('#kbTable tbody');
-             tbody.innerHTML = '<tr><td colspan="5" class="text-center p-5"><div class="spinner-border text-primary" role="status"></div><div class="mt-2 text-muted small">Loading training data...</div></td></tr>';
+             tbody.innerHTML = '<tr><td colspan="5" class="text-center p-5"><div class="spinner-border text-primary" role="status"></div><div class="mt-2 text-muted small">加载训练数据中...</div></td></tr>';
+             
              try {
-                const res = await authFetch('/api/v0/get_training_data');
+                // 根据当前管理的知识库选择API
+                let apiUrl = '/api/v0/get_training_data';
+                if (managingKbId && managingKbId !== 'default') {
+                    apiUrl = `/api/v0/knowledge_bases/${managingKbId}/training_data`;
+                }
+                
+                const res = await authFetch(apiUrl);
                 const data = await res.json();
                 KB_DATA = data || [];
+                
                 if (!data || data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-5">No training data found.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-5">暂无训练数据</td></tr>';
                     return;
                 }
+                
                 tbody.innerHTML = data.map(item => {
                     let badgeClass = 'type-doc';
                     if (item.training_data_type === 'ddl') badgeClass = 'type-ddl';
                     if (item.training_data_type === 'sql') badgeClass = 'type-sql';
                     const content = item.content || '';
-                    return `<tr><td><input class="form-check-input kb-checkbox" type="checkbox" value="${item.id}" onchange="updateBatchDeleteBtn()"></td><td><span class="badge ${badgeClass} type-badge">${item.training_data_type}</span></td><td><div class="content-cell">${content}</div></td><td><div class="text-truncate" style="max-width: 200px;">${item.question || '-'}</div></td><td class="text-center"><button class="btn btn-sm btn-light border me-1" onclick="editData('${item.id}')"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-light border text-danger" onclick="deleteData('${item.id}')"><i class="bi bi-trash"></i></button></td></tr>`;
+                    return `<tr>
+                        <td><input class="form-check-input kb-checkbox" type="checkbox" value="${item.id}" onchange="updateBatchDeleteBtn()"></td>
+                        <td><span class="badge ${badgeClass} type-badge">${item.training_data_type}</span></td>
+                        <td><div class="content-cell">${content}</div></td>
+                        <td><div class="text-truncate" style="max-width: 200px;">${item.question || '-'}</div></td>
+                        <td class="text-center">
+                            <button class="btn btn-sm btn-light border me-1" onclick="editData('${item.id}')"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-light border text-danger" onclick="deleteData('${item.id}')"><i class="bi bi-trash"></i></button>
+                        </td>
+                    </tr>`;
                 }).join('');
-             } catch(e) { tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger p-4">Error: ${e.message}</td></tr>`; }
+             } catch(e) { 
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger p-4">加载失败: ${e.message}</td></tr>`; 
+             }
         }
 
         const addModal = new bootstrap.Modal(document.getElementById('addModal'));
@@ -1475,18 +2640,36 @@
             const type = document.getElementById('addType').value;
             const content = document.getElementById('addContent').value.trim();
             const question = document.getElementById('addQuestion').value.trim();
-            if (!content) { alert('Content is required'); return; }
-            if (type === 'sql' && !question) { alert('Question is required for SQL type'); return; }
+            if (!content) { alert('请输入内容'); return; }
+            if (type === 'sql' && !question) { alert('SQL类型必须填写相关问题'); return; }
+            
             try {
-                if (currentEditId) {
-                    const delRes = await authFetch(`/api/v0/training_data/${currentEditId}`, { method: 'DELETE' });
-                    if (!delRes.ok) throw new Error('Failed to update');
+                // 根据当前管理的知识库选择API
+                let deleteUrl, addUrl;
+                if (managingKbId && managingKbId !== 'default') {
+                    deleteUrl = `/api/v0/knowledge_bases/${managingKbId}/training_data/${currentEditId}`;
+                    addUrl = `/api/v0/knowledge_bases/${managingKbId}/training_data`;
+                } else {
+                    deleteUrl = `/api/v0/training_data/${currentEditId}`;
+                    addUrl = '/api/v0/training_data';
                 }
-                const res = await authFetch('/api/v0/training_data', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type, content, question}) });
-                if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Failed to save data'); }
+                
+                if (currentEditId) {
+                    const delRes = await authFetch(deleteUrl, { method: 'DELETE' });
+                    if (!delRes.ok) throw new Error('更新失败');
+                }
+                const res = await authFetch(addUrl, { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({type, content, question}) 
+                });
+                if (!res.ok) { 
+                    const err = await res.json(); 
+                    throw new Error(err.detail || '保存失败'); 
+                }
                 hideAddModal();
                 loadKnowledgeBase();
-            } catch (e) { alert('Error: ' + e.message); }
+            } catch (e) { alert('错误: ' + e.message); }
         }
 
         async function submitFeedback(msgId, type, btnElement) {
@@ -1501,7 +2684,9 @@
             if (type === 'up') btnElement.classList.add('active-up');
             if (type === 'down') btnElement.classList.add('active-down');
             try {
-                await authFetch('/api/v0/feedback', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ question: data.question, sql: data.sql, explanation: data.explanation, feedback_type: type }) });
+                await authFetch('/api/v0/feedback', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ question: data.question, sql: data.sql, explanation: data.explanation, feedback_type: type, message_id: data.serverMessageId || null }) });
+                data.feedbackType = type;
+                applyFeedbackButtonState(parent, type);
                 if (type === 'down') alert('Thanks for your feedback! We will improve the model.');
             } catch (e) {
                 console.error('Feedback error', e);
@@ -1510,19 +2695,30 @@
         }
 
         async function deleteData(id) {
-            if (!confirm('Are you sure you want to delete this training data?')) return;
+            if (!confirm('确定要删除此训练数据吗？')) return;
             try {
-                const res = await authFetch(`/api/v0/training_data/${id}`, { method: 'DELETE' });
-                if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Failed to delete data'); }
+                // 根据当前管理的知识库选择API
+                let deleteUrl;
+                if (managingKbId && managingKbId !== 'default') {
+                    deleteUrl = `/api/v0/knowledge_bases/${managingKbId}/training_data/${id}`;
+                } else {
+                    deleteUrl = `/api/v0/training_data/${id}`;
+                }
+                
+                const res = await authFetch(deleteUrl, { method: 'DELETE' });
+                if (!res.ok) { 
+                    const err = await res.json(); 
+                    throw new Error(err.detail || '删除失败'); 
+                }
                 loadKnowledgeBase();
-            } catch (e) { alert('Error: ' + e.message); }
+            } catch (e) { alert('错误: ' + e.message); }
         }
 
         function updateBatchDeleteBtn() {
             const len = document.querySelectorAll('.kb-checkbox:checked').length;
             const btn = document.getElementById('batchDeleteBtn');
             btn.style.display = len > 0 ? 'inline-block' : 'none';
-            btn.innerHTML = `<i class="bi bi-trash me-1"></i>Delete (${len})`;
+            btn.innerHTML = `<i class="bi bi-trash me-1"></i>批量删除 (${len})`;
         }
         function toggleSelectAll() {
             const chk = document.getElementById('selectAllKb').checked;
@@ -1531,17 +2727,50 @@
         }
         async function batchDelete() {
             const ids = Array.from(document.querySelectorAll('.kb-checkbox:checked')).map(cb => cb.value);
-            if(ids.length === 0 || !confirm(`Delete ${ids.length} items?`)) return;
+            if(ids.length === 0 || !confirm(`确定要删除 ${ids.length} 条数据吗？`)) return;
+            
             try {
-                await authFetch('/api/v0/training_data/batch_delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ids})});
+                if (managingKbId && managingKbId !== 'default') {
+                    // 非默认知识库，逐个删除
+                    for (const id of ids) {
+                        await authFetch(`/api/v0/knowledge_bases/${managingKbId}/training_data/${id}`, { method: 'DELETE' });
+                    }
+                } else {
+                    // 默认知识库，使用批量删除API
+                    await authFetch('/api/v0/training_data/batch_delete', { 
+                        method: 'POST', 
+                        headers: {'Content-Type': 'application/json'}, 
+                        body: JSON.stringify({ids})
+                    });
+                }
                 loadKnowledgeBase();
                 document.getElementById('selectAllKb').checked = false;
-            } catch(e) { alert(e.message); }
+            } catch(e) { alert('删除失败: ' + e.message); }
         }
         
         function downloadChart(msgId, format) {
              const chartInfo = CHART_INSTANCES[msgId];
              if (!chartInfo) return;
+             if (chartInfo.type === 'g2plot') {
+                 const chart = chartInfo.chart;
+                 try {
+                     if (chart && typeof chart.downloadImage === 'function') {
+                         chart.downloadImage(`chart.${format}`);
+                         return;
+                     }
+                 } catch (e) {
+                     console.warn('G2Plot downloadImage failed:', e);
+                 }
+                 const canvas = chart?.chart?.getCanvas?.();
+                 const dataUrl = canvas?.toDataURL ? canvas.toDataURL(`image/${format}`) : null;
+                 if (dataUrl) {
+                     const link = document.createElement('a');
+                     link.download = `chart.${format}`;
+                     link.href = dataUrl;
+                     link.click();
+                 }
+                 return;
+             }
              if (chartInfo.type === 'plotly') {
                  Plotly.toImage(chartInfo.chart, { format }).then(dataUrl => {
                      const link = document.createElement('a');
@@ -1561,6 +2790,949 @@
         function toggleFullscreen(id) {
              const el = document.getElementById(id);
              document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen();
+        }
+        
+        // ==================== 数据源管理 ====================
+        
+        let dsModal = null;
+        
+        async function loadDatasources() {
+            const container = document.getElementById('dsList');
+            container.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary" role="status"></div></div>';
+            
+            try {
+                const res = await authFetch('/api/v0/datasources');
+                DS_DATA = await res.json();
+                
+                if (DS_DATA.length === 0) {
+                    container.innerHTML = '<div class="text-center text-muted p-5">暂无数据源，点击"新增数据源"添加</div>';
+                    return;
+                }
+                
+                container.innerHTML = DS_DATA.map(ds => {
+                    const dbCount = ds.databases?.length || 0;
+                    const dbInfo = dbCount > 0 
+                        ? `<span class="badge bg-info me-1">${dbCount}个数据库</span>` 
+                        : '<span class="badge bg-warning me-1">未选择数据库</span>';
+                    const defaultDbInfo = ds.default_database 
+                        ? `<small class="text-muted">(默认: ${ds.default_database})</small>` 
+                        : '';
+                    
+                    return `
+                    <div class="ds-card ${ds.status === 'active' ? 'active' : ''}" data-id="${ds.id}">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <h6 class="mb-1 fw-bold">${ds.name}</h6>
+                                <p class="mb-1 text-muted small">${ds.host}:${ds.port} - ${ds.user}</p>
+                                <p class="mb-2 small">${dbInfo}${defaultDbInfo}</p>
+                                <span class="ds-status ${ds.status}">
+                                    <i class="bi bi-${ds.status === 'active' ? 'check-circle-fill' : ds.status === 'error' ? 'x-circle-fill' : 'circle'}"></i>
+                                    ${ds.status === 'active' ? '已连接' : ds.status === 'error' ? '连接错误' : '未连接'}
+                                </span>
+                            </div>
+                            <div class="btn-group">
+                                ${ds.id !== 'default' ? `
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="testDatasourceById('${ds.id}')" title="测试连接">
+                                        <i class="bi bi-plug"></i>
+                                    </button>
+                                    ${(ds.databases && ds.databases.length > 0) ? `
+                                    <button class="btn btn-sm btn-outline-success" onclick="generateCorpusFromDatasource('${ds.id}')" title="AI生成语料">
+                                        <i class="bi bi-magic"></i>
+                                    </button>
+                                    ` : ''}
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="editDatasource('${ds.id}')" title="编辑">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteDatasource('${ds.id}')" title="删除">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                ` : `
+                                    <span class="badge bg-secondary">环境变量配置</span>
+                                `}
+                            </div>
+                        </div>
+                    </div>
+                `}).join('');
+                
+            } catch(e) {
+                container.innerHTML = `<div class="text-center text-danger p-4">加载失败: ${e.message}</div>`;
+            }
+        }
+        
+        function showDsModal(editData = null) {
+            if (!dsModal) dsModal = new bootstrap.Modal(document.getElementById('dsModal'));
+            
+            document.getElementById('dsModalTitle').textContent = editData ? '编辑数据源' : '新增数据源';
+            document.getElementById('dsEditId').value = editData?.id || '';
+            document.getElementById('dsName').value = editData?.name || '';
+            document.getElementById('dsHost').value = editData?.host || '';
+            document.getElementById('dsPort').value = editData?.port || 3306;
+            document.getElementById('dsUser').value = editData?.user || '';
+            document.getElementById('dsPassword').value = '';
+            document.getElementById('dsSsl').checked = editData?.ssl_enabled !== false;
+            document.getElementById('dsTestResult').className = 'alert d-none';
+            
+            // 重置数据库选择区域
+            const dbSection = document.getElementById('dsDatabaseSection');
+            const dbList = document.getElementById('dsDatabaseList');
+            const defaultDbSelect = document.getElementById('dsDefaultDatabase');
+            
+            if (editData && editData.id) {
+                // 编辑模式，显示数据库区域并加载数据库列表
+                dbSection.classList.remove('d-none');
+                dbList.innerHTML = '<div class="text-center p-2"><div class="spinner-border spinner-border-sm text-primary" role="status"></div><div class="text-muted small mt-2">加载数据库列表中...</div></div>';
+                defaultDbSelect.innerHTML = '<option value="">不设置默认数据库</option>';
+                // 如果已保存，测试连接获取完整数据库列表
+                testDsConnectionAndLoadDatabases(editData.id, editData.databases || [], editData.default_database || null);
+            } else {
+                // 新增模式，隐藏数据库区域
+                dbSection.classList.add('d-none');
+                dbList.innerHTML = '<div class="text-muted small">请先测试连接</div>';
+                defaultDbSelect.innerHTML = '<option value="">不设置默认数据库</option>';
+            }
+            
+            dsModal.show();
+        }
+        
+        // 测试连接并加载数据库列表
+        async function testDsConnectionAndLoadDatabases(dsId, selectedDbs = [], defaultDb = null) {
+            const dbList = document.getElementById('dsDatabaseList');
+            const defaultDbSelect = document.getElementById('dsDefaultDatabase');
+            
+            try {
+                const res = await authFetch(`/api/v0/datasources/${dsId}/test`, { method: 'POST' });
+                const result = await res.json();
+                
+                if (result.success && result.databases) {
+                    renderDatabaseList(result.databases, selectedDbs, defaultDb);
+                } else {
+                    dbList.innerHTML = '<div class="text-muted small">获取数据库列表失败</div>';
+                }
+            } catch(e) {
+                dbList.innerHTML = '<div class="text-muted small">获取数据库列表失败</div>';
+            }
+        }
+        
+        // 渲染数据库选择列表
+        function renderDatabaseList(allDatabases, selectedDbs = [], defaultDb = null) {
+            const dbList = document.getElementById('dsDatabaseList');
+            const defaultDbSelect = document.getElementById('dsDefaultDatabase');
+            
+            // 过滤掉系统数据库
+            const systemDbs = ['information_schema', 'mysql', 'performance_schema', 'sys'];
+            const userDatabases = allDatabases.filter(db => !systemDbs.includes(db.toLowerCase()));
+            
+            // 渲染复选框列表
+            dbList.innerHTML = userDatabases.map(db => `
+                <div class="form-check">
+                    <input class="form-check-input ds-db-checkbox" type="checkbox" value="${db}" 
+                           id="dsDb_${db}" ${selectedDbs.includes(db) ? 'checked' : ''}
+                           onchange="updateDefaultDbOptions()">
+                    <label class="form-check-label" for="dsDb_${db}">${db}</label>
+                </div>
+            `).join('');
+            
+            if (userDatabases.length === 0) {
+                dbList.innerHTML = '<div class="text-muted small">没有可用的用户数据库</div>';
+            }
+            
+            // 更新默认数据库下拉框
+            updateDefaultDbOptions(defaultDb);
+        }
+        
+        // 更新默认数据库选项
+        function updateDefaultDbOptions(keepDefault = null) {
+            const defaultDbSelect = document.getElementById('dsDefaultDatabase');
+            const selectedDbs = Array.from(document.querySelectorAll('.ds-db-checkbox:checked'))
+                .map(cb => cb.value);
+            
+            const currentDefault = keepDefault || defaultDbSelect.value;
+            
+            defaultDbSelect.innerHTML = '<option value="">不设置默认数据库</option>';
+            selectedDbs.forEach(db => {
+                const selected = db === currentDefault ? 'selected' : '';
+                defaultDbSelect.innerHTML += `<option value="${db}" ${selected}>${db}</option>`;
+            });
+        }
+        
+        function editDatasource(id) {
+            const ds = DS_DATA.find(d => d.id === id);
+            if (ds) showDsModal(ds);
+        }
+        
+        async function testDsConnection() {
+            const resultEl = document.getElementById('dsTestResult');
+            const dbSection = document.getElementById('dsDatabaseSection');
+            resultEl.className = 'alert alert-info';
+            resultEl.textContent = '正在测试连接...';
+            
+            const editId = document.getElementById('dsEditId').value;
+            
+            if (editId) {
+                // 测试已保存的数据源
+                try {
+                    const res = await authFetch(`/api/v0/datasources/${editId}/test`, { method: 'POST' });
+                    const result = await res.json();
+                    
+                    if (result.success) {
+                        resultEl.className = 'alert alert-success';
+                        resultEl.textContent = `连接成功！发现 ${result.databases.length} 个数据库，请在下方选择要使用的数据库`;
+                        
+                        // 显示数据库选择区域
+                        dbSection.classList.remove('d-none');
+                        
+                        // 获取当前已选中的数据库（如果是编辑模式）
+                        const ds = DS_DATA.find(d => d.id === editId);
+                        const selectedDbs = ds?.databases || [];
+                        const defaultDb = ds?.default_database || null;
+                        
+                        renderDatabaseList(result.databases, selectedDbs, defaultDb);
+                    } else {
+                        resultEl.className = 'alert alert-danger';
+                        resultEl.textContent = result.message;
+                        dbSection.classList.add('d-none');
+                    }
+                } catch(e) {
+                    resultEl.className = 'alert alert-danger';
+                    resultEl.textContent = `测试失败: ${e.message}`;
+                    dbSection.classList.add('d-none');
+                }
+            } else {
+                resultEl.className = 'alert alert-warning';
+                resultEl.textContent = '请先保存数据源后再测试连接';
+            }
+        }
+        
+        async function testDatasourceById(id) {
+            try {
+                const res = await authFetch(`/api/v0/datasources/${id}/test`, { method: 'POST' });
+                const result = await res.json();
+                
+                if (result.success) {
+                    // 刷新数据源列表
+                    await loadDatasources();
+                    
+                    // 获取数据源信息
+                    const ds = DS_DATA.find(d => d.id === id);
+                    
+                    // 如果没有选择数据库，自动打开编辑弹窗让用户选择
+                    if (!ds || !ds.databases || ds.databases.length === 0) {
+                        // 打开编辑弹窗
+                        editDatasource(id);
+                        // 等待弹窗打开后，自动触发测试连接
+                        setTimeout(() => {
+                            testDsConnection();
+                        }, 300);
+                    } else {
+                        alert(`连接成功！已选择 ${ds.databases.length} 个数据库`);
+                    }
+                } else {
+                    alert(`连接失败: ${result.message}`);
+                    loadDatasources();
+                }
+            } catch(e) {
+                alert(`测试失败: ${e.message}`);
+                loadDatasources();
+            }
+        }
+        
+        async function saveDatasource() {
+            const editId = document.getElementById('dsEditId').value;
+            const dbSection = document.getElementById('dsDatabaseSection');
+            
+            // 收集选中的数据库
+            const selectedDatabases = Array.from(document.querySelectorAll('.ds-db-checkbox:checked'))
+                .map(cb => cb.value);
+            const defaultDatabase = document.getElementById('dsDefaultDatabase')?.value || null;
+            
+            // 如果数据库选择区域是显示的（说明已经测试过连接），但没有选择数据库，给出提示
+            if (!dbSection.classList.contains('d-none') && selectedDatabases.length === 0) {
+                if (!confirm('您还没有选择任何数据库。是否继续保存？\n\n建议：至少选择一个数据库，否则数据源将无法正常使用。')) {
+                    return;
+                }
+            }
+            
+            const data = {
+                name: document.getElementById('dsName').value.trim(),
+                host: document.getElementById('dsHost').value.trim(),
+                port: parseInt(document.getElementById('dsPort').value),
+                user: document.getElementById('dsUser').value.trim(),
+                password: document.getElementById('dsPassword').value,
+                databases: selectedDatabases,
+                default_database: defaultDatabase,
+                ssl_enabled: document.getElementById('dsSsl').checked
+            };
+            
+            if (!data.name || !data.host || !data.user) {
+                alert('请填写必填字段');
+                return;
+            }
+            
+            // 如果有密码字段为空且是编辑模式，不发送密码（保持原密码）
+            if (editId && !data.password) {
+                delete data.password;
+            }
+            
+            try {
+                const url = editId ? `/api/v0/datasources/${editId}` : '/api/v0/datasources';
+                const method = editId ? 'PUT' : 'POST';
+                
+                const res = await authFetch(url, {
+                    method,
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '保存失败');
+                }
+                
+                dsModal.hide();
+                loadDatasources();
+                loadChatSelectors();
+            } catch(e) {
+                alert(`保存失败: ${e.message}`);
+            }
+        }
+        
+        async function deleteDatasource(id) {
+            if (!confirm('确定要删除此数据源吗？')) return;
+            
+            try {
+                const res = await authFetch(`/api/v0/datasources/${id}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '删除失败');
+                }
+                loadDatasources();
+                loadChatSelectors();
+            } catch(e) {
+                alert(`删除失败: ${e.message}`);
+            }
+        }
+        
+        // ==================== AI语料生成 ====================
+        
+        let CORPUS_DATA = [];  // 当前生成的语料数据
+        let corpusEditorModal = null;
+        let corpusItemModal = null;
+        let currentFilterType = 'all';
+        
+        async function generateCorpusFromDatasource(datasourceId) {
+            const ds = DS_DATA.find(d => d.id === datasourceId);
+            if (!ds) {
+                alert('数据源不存在');
+                return;
+            }
+            
+            if (!ds.databases || ds.databases.length === 0) {
+                alert('该数据源未选择数据库，请先在数据源管理中配置数据库');
+                return;
+            }
+            
+            if (!corpusEditorModal) {
+                corpusEditorModal = new bootstrap.Modal(document.getElementById('corpusEditorModal'));
+            }
+            
+            // 显示弹窗并显示加载状态
+            document.getElementById('corpusDatasourceName').textContent = ds.name;
+            document.getElementById('corpusTableCount').textContent = '0';
+            document.getElementById('corpusTotalCount').textContent = '0';
+            document.getElementById('corpusTableBody').innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center text-muted p-5">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <div class="mt-2">正在生成语料，请稍候...</div>
+                    </td>
+                </tr>
+            `;
+            
+            // 加载知识库列表
+            await loadKnowledgeBasesForCorpus();
+            
+            corpusEditorModal.show();
+            
+            // 添加超时处理
+            const timeoutId = setTimeout(() => {
+                document.getElementById('corpusTableBody').innerHTML = `
+                    <tr>
+                        <td colspan="5" class="text-center text-warning p-5">
+                            <div>生成时间较长，请稍候...</div>
+                            <div class="mt-2 small text-muted">如果超过5分钟仍未完成，请检查后端日志</div>
+                        </td>
+                    </tr>
+                `;
+            }, 30000); // 30秒后提示
+            
+            try {
+                // 调用API生成语料（设置较长的超时时间）
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 600000); // 10分钟超时
+                
+                const res = await authFetch(`/api/v0/datasources/${datasourceId}/generate_corpus`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        generate_documentation: true,
+                        generate_sql_examples: true
+                    }),
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeout);
+                clearTimeout(timeoutId);
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '生成语料失败');
+                }
+                
+                const result = await res.json();
+                CORPUS_DATA = result.corpus || [];
+                
+                // 更新统计信息
+                document.getElementById('corpusTableCount').textContent = result.table_count || 0;
+                document.getElementById('corpusTotalCount').textContent = CORPUS_DATA.length;
+                
+                // 如果表数量为0，显示提示
+                if (result.table_count === 0) {
+                    document.getElementById('corpusTableBody').innerHTML = `
+                        <tr>
+                            <td colspan="5" class="text-center text-warning p-5">
+                                <div class="mb-2"><i class="bi bi-exclamation-triangle fs-4"></i></div>
+                                <div>未找到任何表</div>
+                                <div class="mt-2 small text-muted">可能的原因：<br>
+                                1. 数据源未选择数据库（请先测试连接并选择数据库）<br>
+                                2. 数据库中没有表<br>
+                                3. 数据库连接权限不足<br>
+                                4. 请查看后端控制台日志获取详细信息</div>
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    // 渲染语料列表
+                    renderCorpusTable();
+                }
+                
+            } catch(e) {
+                clearTimeout(timeoutId);
+                console.error('生成语料失败:', e);
+                
+                let errorMsg = e.message;
+                if (e.name === 'AbortError') {
+                    errorMsg = '请求超时（超过10分钟），请检查后端日志或减少处理的表数量';
+                }
+                
+                document.getElementById('corpusTableBody').innerHTML = `
+                    <tr>
+                        <td colspan="5" class="text-center text-danger p-5">
+                            <div class="mb-2"><i class="bi bi-x-circle fs-4"></i></div>
+                            <div>生成失败: ${errorMsg}</div>
+                            <div class="mt-2 small text-muted">请检查：<br>
+                            1. 数据源连接是否正常（先测试连接）<br>
+                            2. 是否已选择数据库（在数据源管理中配置）<br>
+                            3. 数据库是否有表<br>
+                            4. 查看后端控制台日志获取详细错误信息</div>
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+        
+        function renderCorpusTable() {
+            const tbody = document.getElementById('corpusTableBody');
+            
+            // 过滤语料
+            let filteredData = CORPUS_DATA;
+            if (currentFilterType !== 'all') {
+                filteredData = CORPUS_DATA.filter(item => item.type === currentFilterType);
+            }
+            
+            if (filteredData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-5">暂无语料</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = filteredData.map((item, index) => {
+                const originalIndex = CORPUS_DATA.indexOf(item);
+                const typeBadge = {
+                    'ddl': '<span class="badge bg-secondary">DDL</span>',
+                    'sql': '<span class="badge bg-primary">SQL</span>',
+                    'documentation': '<span class="badge bg-info">文档</span>'
+                }[item.type] || '<span class="badge bg-secondary">未知</span>';
+                
+                const contentPreview = item.content.length > 100 
+                    ? item.content.substring(0, 100) + '...' 
+                    : item.content;
+                
+                return `
+                    <tr>
+                        <td>${typeBadge}</td>
+                        <td><small class="text-muted">${contentPreview.replace(/\n/g, '<br>')}</small></td>
+                        <td><small>${item.question || '-'}</small></td>
+                        <td><small class="text-muted">${item.tags || '-'}</small></td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editCorpusItem(${originalIndex})" title="编辑">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteCorpusItem(${originalIndex})" title="删除">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+            
+            updateCorpusSelectedCount();
+        }
+        
+        function filterCorpus() {
+            const filter = document.querySelector('input[name="corpusFilter"]:checked');
+            currentFilterType = filter ? filter.value : 'all';
+            renderCorpusTable();
+        }
+        
+        function addNewCorpusItem() {
+            if (!corpusItemModal) {
+                corpusItemModal = new bootstrap.Modal(document.getElementById('corpusItemModal'));
+            }
+            
+            document.getElementById('corpusItemIndex').value = '-1';
+            document.getElementById('corpusItemType').value = 'documentation';
+            document.getElementById('corpusItemContent').value = '';
+            document.getElementById('corpusItemQuestion').value = '';
+            document.getElementById('corpusItemTags').value = '';
+            onCorpusItemTypeChange();
+            
+            corpusItemModal.show();
+        }
+        
+        function editCorpusItem(index) {
+            if (!corpusItemModal) {
+                corpusItemModal = new bootstrap.Modal(document.getElementById('corpusItemModal'));
+            }
+            
+            const item = CORPUS_DATA[index];
+            document.getElementById('corpusItemIndex').value = index;
+            document.getElementById('corpusItemType').value = item.type;
+            document.getElementById('corpusItemContent').value = item.content;
+            document.getElementById('corpusItemQuestion').value = item.question || '';
+            document.getElementById('corpusItemTags').value = item.tags || '';
+            onCorpusItemTypeChange();
+            
+            corpusItemModal.show();
+        }
+        
+        function onCorpusItemTypeChange() {
+            const type = document.getElementById('corpusItemType').value;
+            const questionRequired = document.getElementById('corpusQuestionRequired');
+            if (type === 'sql') {
+                questionRequired.style.display = 'inline';
+            } else {
+                questionRequired.style.display = 'none';
+            }
+        }
+        
+        function saveCorpusItem() {
+            const index = parseInt(document.getElementById('corpusItemIndex').value);
+            const type = document.getElementById('corpusItemType').value;
+            const content = document.getElementById('corpusItemContent').value.trim();
+            const question = document.getElementById('corpusItemQuestion').value.trim();
+            const tags = document.getElementById('corpusItemTags').value.trim();
+            
+            if (!content) {
+                alert('内容不能为空');
+                return;
+            }
+            
+            if (type === 'sql' && !question) {
+                alert('SQL类型必须提供用户问题示例');
+                return;
+            }
+            
+            const item = {
+                id: index >= 0 ? CORPUS_DATA[index].id : `new-${Date.now()}`,
+                type: type,
+                content: content,
+                question: question || null,
+                tags: tags || null
+            };
+            
+            if (index >= 0) {
+                // 更新
+                CORPUS_DATA[index] = item;
+            } else {
+                // 新增
+                CORPUS_DATA.push(item);
+            }
+            
+            corpusItemModal.hide();
+            renderCorpusTable();
+            document.getElementById('corpusTotalCount').textContent = CORPUS_DATA.length;
+        }
+        
+        function deleteCorpusItem(index) {
+            if (!confirm('确定要删除这条语料吗？')) return;
+            
+            CORPUS_DATA.splice(index, 1);
+            renderCorpusTable();
+            document.getElementById('corpusTotalCount').textContent = CORPUS_DATA.length;
+        }
+        
+        function updateCorpusSelectedCount() {
+            const count = currentFilterType === 'all' ? CORPUS_DATA.length : CORPUS_DATA.filter(item => item.type === currentFilterType).length;
+            document.getElementById('corpusSelectedCount').textContent = count;
+        }
+        
+        async function loadKnowledgeBasesForCorpus() {
+            try {
+                const res = await authFetch('/api/v0/knowledge_bases');
+                const kbs = await res.json();
+                
+                const select = document.getElementById('corpusTargetKb');
+                select.innerHTML = '<option value="">请选择知识库</option>';
+                kbs.forEach(kb => {
+                    select.innerHTML += `<option value="${kb.id}">${kb.name}</option>`;
+                });
+            } catch(e) {
+                console.error('加载知识库列表失败:', e);
+            }
+        }
+        
+        async function importCorpusToKnowledgeBase() {
+            const kbId = document.getElementById('corpusTargetKb').value;
+            if (!kbId) {
+                alert('请选择目标知识库');
+                return;
+            }
+            
+            if (CORPUS_DATA.length === 0) {
+                alert('没有可导入的语料');
+                return;
+            }
+            
+            if (!confirm(`确定要将 ${CORPUS_DATA.length} 条语料导入到选中的知识库吗？`)) {
+                return;
+            }
+            
+            try {
+                const res = await authFetch(`/api/v0/knowledge_bases/${kbId}/import_corpus`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        corpus: CORPUS_DATA
+                    })
+                });
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '导入失败');
+                }
+                
+                const result = await res.json();
+                alert(`导入完成！成功: ${result.success_count}条, 失败: ${result.fail_count}条`);
+                
+                if (result.errors && result.errors.length > 0) {
+                    console.error('导入错误:', result.errors);
+                }
+                
+                corpusEditorModal.hide();
+                
+                // 刷新知识库列表
+                if (typeof loadKnowledgeBases === 'function') {
+                    loadKnowledgeBases();
+                }
+                
+            } catch(e) {
+                alert(`导入失败: ${e.message}`);
+            }
+        }
+        
+        // ==================== 知识库管理 ====================
+        
+        let kbmModal = null;
+        let kbmUploadModal = null;
+        
+        async function loadKnowledgeBases() {
+            const container = document.getElementById('kbmList');
+            container.innerHTML = '<div class="text-center p-5"><div class="spinner-border text-primary" role="status"></div></div>';
+            
+            try {
+                const res = await authFetch('/api/v0/knowledge_bases');
+                KBM_DATA = await res.json();
+                
+                if (KBM_DATA.length === 0) {
+                    container.innerHTML = '<div class="text-center text-muted p-5">暂无知识库，点击"新建知识库"添加</div>';
+                    return;
+                }
+                
+                container.innerHTML = KBM_DATA.map(kb => {
+                    const isTraining = kb.status === 'training';
+                    // 支持多数据源显示
+                    const dsIds = kb.datasource_ids || [];
+                    const dsNames = dsIds.length > 0 
+                        ? dsIds.map(id => DS_DATA.find(d => d.id === id)?.name || id).join(', ')
+                        : '未关联';
+                    
+                    return `
+                        <div class="kb-card" data-id="${kb.id}">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div style="flex: 1;">
+                                    <h6 class="mb-1 fw-bold">${kb.name}</h6>
+                                    <p class="mb-2 text-muted small">${kb.description || '暂无描述'}</p>
+                                    <p class="mb-0 small"><i class="bi bi-hdd-network me-1"></i>关联数据源: ${dsNames}</p>
+                                    <div class="kb-stats">
+                                        <div class="kb-stat">
+                                            <i class="bi bi-table"></i>
+                                            DDL: <span class="kb-stat-value">${kb.ddl_count}</span>
+                                        </div>
+                                        <div class="kb-stat">
+                                            <i class="bi bi-code-square"></i>
+                                            SQL: <span class="kb-stat-value">${kb.sql_count}</span>
+                                        </div>
+                                        <div class="kb-stat">
+                                            <i class="bi bi-file-text"></i>
+                                            Doc: <span class="kb-stat-value">${kb.doc_count}</span>
+                                        </div>
+                                    </div>
+                                    ${isTraining ? `
+                                        <div class="training-progress">
+                                            <div class="progress">
+                                                <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 50%"></div>
+                                            </div>
+                                            <small class="text-muted">训练中...</small>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-outline-info" onclick="manageKbTrainingData('${kb.id}', '${kb.name}')" title="管理数据">
+                                        <i class="bi bi-database"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="showUploadModal('${kb.id}')" title="上传语料">
+                                        <i class="bi bi-upload"></i>
+                                    </button>
+                                    ${kb.id !== 'default' ? `
+                                        <button class="btn btn-sm btn-outline-secondary" onclick="editKnowledgeBase('${kb.id}')" title="编辑">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" onclick="deleteKnowledgeBase('${kb.id}')" title="删除">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+            } catch(e) {
+                container.innerHTML = `<div class="text-center text-danger p-4">加载失败: ${e.message}</div>`;
+            }
+        }
+        
+        function showKbmModal(editData = null) {
+            if (!kbmModal) kbmModal = new bootstrap.Modal(document.getElementById('kbmModal'));
+            
+            document.getElementById('kbmModalTitle').textContent = editData ? '编辑知识库' : '新建知识库';
+            document.getElementById('kbmEditId').value = editData?.id || '';
+            document.getElementById('kbmName').value = editData?.name || '';
+            document.getElementById('kbmDescription').value = editData?.description || '';
+            
+            // 更新数据源复选框列表
+            const dsList = document.getElementById('kbmDatasourceList');
+            const selectedIds = editData?.datasource_ids || [];
+            
+            if (DS_DATA.length === 0) {
+                dsList.innerHTML = '<div class="text-muted small">暂无可用数据源</div>';
+            } else {
+                dsList.innerHTML = DS_DATA.map(ds => `
+                    <div class="form-check">
+                        <input class="form-check-input kbm-ds-checkbox" type="checkbox" 
+                               value="${ds.id}" id="kbmDs_${ds.id}"
+                               ${selectedIds.includes(ds.id) ? 'checked' : ''}>
+                        <label class="form-check-label" for="kbmDs_${ds.id}">
+                            ${ds.name} <small class="text-muted">(${ds.host})</small>
+                        </label>
+                    </div>
+                `).join('');
+            }
+            
+            kbmModal.show();
+        }
+        
+        function editKnowledgeBase(id) {
+            const kb = KBM_DATA.find(k => k.id === id);
+            if (kb) showKbmModal(kb);
+        }
+        
+        async function saveKnowledgeBase() {
+            const editId = document.getElementById('kbmEditId').value;
+            
+            // 收集选中的数据源ID
+            const selectedDsIds = Array.from(document.querySelectorAll('.kbm-ds-checkbox:checked'))
+                .map(cb => cb.value);
+            
+            const data = {
+                name: document.getElementById('kbmName').value.trim(),
+                description: document.getElementById('kbmDescription').value.trim(),
+                datasource_ids: selectedDsIds
+            };
+            
+            if (!data.name) {
+                alert('请填写知识库名称');
+                return;
+            }
+            
+            try {
+                const url = editId ? `/api/v0/knowledge_bases/${editId}` : '/api/v0/knowledge_bases';
+                const method = editId ? 'PUT' : 'POST';
+                
+                const res = await authFetch(url, {
+                    method,
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '保存失败');
+                }
+                
+                kbmModal.hide();
+                loadKnowledgeBases();
+                loadChatSelectors();
+            } catch(e) {
+                alert(`保存失败: ${e.message}`);
+            }
+        }
+        
+        async function deleteKnowledgeBase(id) {
+            if (!confirm('确定要删除此知识库吗？删除后训练数据将无法恢复！')) return;
+            
+            try {
+                const res = await authFetch(`/api/v0/knowledge_bases/${id}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '删除失败');
+                }
+                loadKnowledgeBases();
+                loadChatSelectors();
+            } catch(e) {
+                alert(`删除失败: ${e.message}`);
+            }
+        }
+        
+        function showUploadModal(kbId) {
+            if (!kbmUploadModal) kbmUploadModal = new bootstrap.Modal(document.getElementById('kbmUploadModal'));
+            
+            document.getElementById('uploadKbId').value = kbId;
+            document.getElementById('uploadFile').value = '';
+            document.getElementById('uploadProgress').classList.add('d-none');
+            
+            kbmUploadModal.show();
+        }
+        
+        async function uploadAndTrain() {
+            const kbId = document.getElementById('uploadKbId').value;
+            const fileInput = document.getElementById('uploadFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('请选择文件');
+                return;
+            }
+            
+            const progressDiv = document.getElementById('uploadProgress');
+            const progressBar = progressDiv.querySelector('.progress-bar');
+            const statusText = document.getElementById('uploadStatus');
+            
+            progressDiv.classList.remove('d-none');
+            progressBar.style.width = '10%';
+            statusText.textContent = '正在上传文件...';
+            
+            try {
+                // 1. 上传文件
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const uploadRes = await authFetch(`/api/v0/knowledge_bases/${kbId}/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!uploadRes.ok) {
+                    const err = await uploadRes.json();
+                    throw new Error(err.detail || '上传失败');
+                }
+                
+                const uploadResult = await uploadRes.json();
+                progressBar.style.width = '30%';
+                statusText.textContent = '文件上传成功，开始训练...';
+                
+                // 2. 启动训练
+                const trainRes = await authFetch(`/api/v0/knowledge_bases/${kbId}/train?file_path=${encodeURIComponent(uploadResult.file_path)}`, {
+                    method: 'POST'
+                });
+                
+                if (!trainRes.ok) {
+                    const err = await trainRes.json();
+                    throw new Error(err.detail || '训练启动失败');
+                }
+                
+                const task = await trainRes.json();
+                progressBar.style.width = '50%';
+                statusText.textContent = `训练任务已启动 (ID: ${task.id})`;
+                
+                // 3. 轮询训练进度
+                await pollTrainingStatus(task.id, progressBar, statusText);
+                
+            } catch(e) {
+                progressBar.style.width = '100%';
+                progressBar.classList.add('bg-danger');
+                statusText.textContent = `失败: ${e.message}`;
+            }
+        }
+        
+        async function pollTrainingStatus(taskId, progressBar, statusText) {
+            const maxAttempts = 100;
+            let attempts = 0;
+            
+            while (attempts < maxAttempts) {
+                try {
+                    const res = await authFetch(`/api/v0/training_tasks/${taskId}`);
+                    const task = await res.json();
+                    
+                    const progress = task.total_records > 0 
+                        ? Math.round(50 + (task.processed_records / task.total_records) * 50)
+                        : 50;
+                    
+                    progressBar.style.width = `${progress}%`;
+                    statusText.textContent = `训练中: ${task.processed_records}/${task.total_records} (成功: ${task.success_count}, 失败: ${task.fail_count})`;
+                    
+                    if (task.status === 'completed') {
+                        progressBar.style.width = '100%';
+                        progressBar.classList.add('bg-success');
+                        statusText.textContent = `训练完成！成功: ${task.success_count}, 失败: ${task.fail_count}`;
+                        loadKnowledgeBases();
+                        return;
+                    }
+                    
+                    if (task.status === 'failed') {
+                        progressBar.classList.add('bg-danger');
+                        statusText.textContent = `训练失败: ${task.error_message}`;
+                        return;
+                    }
+                    
+                    await new Promise(r => setTimeout(r, 1000));
+                    attempts++;
+                } catch(e) {
+                    statusText.textContent = `查询状态失败: ${e.message}`;
+                    return;
+                }
+            }
+            
+            statusText.textContent = '训练超时，请查看知识库状态';
         }
     </script>
 </body>
