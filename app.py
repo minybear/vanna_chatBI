@@ -13,7 +13,7 @@ from decimal import Decimal
 from vanna.legacy.openai import OpenAI_Chat
 from vanna.legacy.chromadb import ChromaDB_VectorStore
 from vanna.legacy.ZhipuAI.ZhipuAI_embeddings import ZhipuAIEmbeddingFunction
-from fastapi import FastAPI, Response, Body, HTTPException, Depends, Header
+from fastapi import FastAPI, Response, Body, HTTPException, Depends, Header, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -269,6 +269,16 @@ class ChromaConversationHistory:
         )
         self.pins = chroma_client.get_or_create_collection(
             name="pinned_charts",
+            embedding_function=self.embedding_function,
+        )
+        # 黑名单：存储用户主动删除的 pin，避免自动 pin 回来
+        self.pin_blacklist = chroma_client.get_or_create_collection(
+            name="pin_blacklist",
+            embedding_function=self.embedding_function,
+        )
+        # 用户设置：存储用户个性化配置
+        self.user_settings = chroma_client.get_or_create_collection(
+            name="user_settings",
             embedding_function=self.embedding_function,
         )
 
@@ -536,22 +546,37 @@ class ChromaConversationHistory:
         return True
 
     def list_pinned(self, operator_id: str = "", username: str = "") -> List[Dict[str, Any]]:
-        data = None
-        if username and operator_id:
-            data = self.pins.get(where={"$and": [{"operator_id": operator_id}, {"username": username}]})
-        elif username:
-            data = self.pins.get(where={"username": username})
-        elif operator_id:
-            data = self.pins.get(where={"operator_id": operator_id})
-        if data is None:
-            data = self.pins.get()
-        documents = data.get("documents") if data else []
+        print(f"[DEBUG list_pinned] operator_id={operator_id!r}, username={username!r}")
+        
+        # 获取全部数据，然后在应用层过滤（ChromaDB 的 where 条件对 None/空字符串处理不一致）
+        all_data = self.pins.get()
+        documents = all_data.get("documents") if all_data else []
+        
         pinned_items = []
         for doc in documents or []:
             try:
-                pinned_items.append(json.loads(doc))
-            except Exception:
+                item = json.loads(doc)
+                item_operator = item.get("operator_id") or ""
+                item_username = item.get("username") or ""
+                
+                # 应用层租户过滤
+                if operator_id and item_operator and item_operator != operator_id:
+                    continue
+                if username and item_username and item_username != username:
+                    continue
+                # 如果查询要求特定 username，但 item 没有 username，也跳过（严格模式）
+                # 但为了兼容旧数据，如果 item_username 为空，则允许同 operator_id 的记录
+                if username and not item_username and operator_id and item_operator == operator_id:
+                    pass  # 允许：同 operator，旧数据无 username
+                elif username and not item_username:
+                    continue  # 跳过：不同 operator 或无 operator 的旧数据
+                    
+                pinned_items.append(item)
+            except Exception as e:
+                print(f"[DEBUG list_pinned] 解析失败: {e}")
                 continue
+        
+        print(f"[DEBUG list_pinned] 过滤后获取到 {len(pinned_items)} 条 pinned 记录")
         pinned_items.sort(key=lambda x: x.get("position", 0))
         return pinned_items
 
@@ -571,12 +596,15 @@ class ChromaConversationHistory:
         return len(ids)
 
     def pin_message(self, message_id: str, operator_id: str = "", username: str = "") -> Dict[str, Any]:
+        print(f"[DEBUG pin_message] message_id={message_id!r}, operator_id={operator_id!r}, username={username!r}")
         existing = self.pins.get(ids=[message_id])
         if existing and existing.get("ids"):
             doc = (existing.get("documents") or [None])[0]
+            print(f"[DEBUG pin_message] 已存在 pinned 记录，直接返回")
             return json.loads(doc) if isinstance(doc, str) else {"message_id": message_id}
 
         message = self.get_message_by_id(message_id, operator_id=operator_id, username=username)
+        print(f"[DEBUG pin_message] get_message_by_id 返回: {message is not None}, chart={bool(message.get('chart') if message else False)}")
         if not message:
             raise ValueError("消息不存在或无权访问")
         has_chart = bool(message.get("chart"))
@@ -585,10 +613,23 @@ class ChromaConversationHistory:
             raise ValueError("该消息没有可收藏的图表")
 
         pinned_items = self.list_pinned(operator_id=operator_id, username=username)
+        max_pins = 6
+        
+        # 如果已达到最大限制，删除最早 pin 的图表
+        if len(pinned_items) >= max_pins:
+            # 按 pinned_at 排序，找到最早的
+            sorted_items = sorted(pinned_items, key=lambda x: x.get("pinned_at") or "")
+            oldest_item = sorted_items[0]
+            oldest_id = oldest_item.get("message_id")
+            if oldest_id:
+                print(f"[DEBUG pin_message] 已达到上限 {max_pins}，删除最早的 pin: {oldest_id}")
+                # 自动删除不加入黑名单（用户未主动删除）
+                self.unpin_message(oldest_id, operator_id=operator_id, username=username, add_to_blacklist=False)
+                # 重新获取列表
+                pinned_items = self.list_pinned(operator_id=operator_id, username=username)
+        
         used_positions = {item.get("position") for item in pinned_items}
-        if len(used_positions) >= 6:
-            raise ValueError("看板最多支持 6 个收藏图表")
-        position = next(pos for pos in range(6) if pos not in used_positions)
+        position = next(pos for pos in range(max_pins) if pos not in used_positions)
 
         payload = {
             "message_id": message_id,
@@ -609,22 +650,130 @@ class ChromaConversationHistory:
             documents=[json.dumps(payload, ensure_ascii=False)],
             metadatas=[{"operator_id": operator_id or "", "username": username or "", "position": position}],
         )
+        print(f"[DEBUG pin_message] 成功保存 pinned 记录: operator_id={operator_id!r}, username={username!r}, position={position}")
         return payload
 
-    def unpin_message(self, message_id: str, operator_id: str = "", username: str = "") -> bool:
-        if operator_id or username:
-            data = self.pins.get(ids=[message_id])
-            if not data or not data.get("ids"):
-                return False
-            meta = (data.get("metadatas") or [{}])[0]
-            owner_id = meta.get("operator_id", "")
-            owner_name = meta.get("username", "")
-            if operator_id and owner_id and owner_id != operator_id:
-                return False
-            if username and owner_name and owner_name != username:
-                return False
+    def unpin_message(self, message_id: str, operator_id: str = "", username: str = "", add_to_blacklist: bool = True) -> bool:
+        """删除 pinned 消息，add_to_blacklist=True 时加入黑名单防止自动 pin 回来"""
+        print(f"[DEBUG unpin_message] message_id={message_id!r}, operator_id={operator_id!r}, username={username!r}")
+        data = self.pins.get(ids=[message_id])
+        if not data or not data.get("ids"):
+            print(f"[DEBUG unpin_message] 记录不存在: {message_id}")
+            return False
+        
+        meta = (data.get("metadatas") or [{}])[0]
+        owner_id = meta.get("operator_id", "")
+        owner_name = meta.get("username", "")
+        print(f"[DEBUG unpin_message] owner_id={owner_id!r}, owner_name={owner_name!r}")
+        
+        # 权限检查：只有所有者可以删除
+        if operator_id and owner_id and owner_id != operator_id:
+            print(f"[DEBUG unpin_message] operator_id 不匹配，拒绝删除")
+            return False
+        if username and owner_name and owner_name != username:
+            print(f"[DEBUG unpin_message] username 不匹配，拒绝删除")
+            return False
+        
         self.pins.delete(ids=[message_id])
+        print(f"[DEBUG unpin_message] 成功删除: {message_id}")
+        
+        # 加入黑名单，防止自动 pin 回来
+        if add_to_blacklist:
+            self._add_to_pin_blacklist(message_id, operator_id, username)
+        
         return True
+
+    def _add_to_pin_blacklist(self, message_id: str, operator_id: str = "", username: str = "") -> None:
+        """将消息加入 pin 黑名单"""
+        self.pin_blacklist.upsert(
+            ids=[message_id],
+            documents=[message_id],
+            metadatas=[{"operator_id": operator_id or "", "username": username or "", "removed_at": self._now()}],
+        )
+        print(f"[DEBUG] 已将 {message_id} 加入 pin 黑名单")
+
+    def is_in_pin_blacklist(self, message_id: str, operator_id: str = "", username: str = "") -> bool:
+        """检查消息是否在 pin 黑名单中"""
+        data = self.pin_blacklist.get(ids=[message_id])
+        if not data or not data.get("ids"):
+            return False
+        meta = (data.get("metadatas") or [{}])[0]
+        # 检查是否是同一用户的黑名单
+        item_operator = meta.get("operator_id", "")
+        item_username = meta.get("username", "")
+        if operator_id and item_operator and item_operator != operator_id:
+            return False
+        if username and item_username and item_username != username:
+            return False
+        return True
+
+    def clear_pin_blacklist(self, operator_id: str = "", username: str = "") -> int:
+        """清除 pin 黑名单"""
+        all_data = self.pin_blacklist.get()
+        if not all_data or not all_data.get("ids"):
+            return 0
+        ids_to_delete = []
+        for i, mid in enumerate(all_data.get("ids", [])):
+            meta = (all_data.get("metadatas") or [])[i] if i < len(all_data.get("metadatas", [])) else {}
+            item_operator = meta.get("operator_id", "")
+            item_username = meta.get("username", "")
+            if operator_id and item_operator and item_operator != operator_id:
+                continue
+            if username and item_username and item_username != username:
+                continue
+            ids_to_delete.append(mid)
+        if ids_to_delete:
+            self.pin_blacklist.delete(ids=ids_to_delete)
+        return len(ids_to_delete)
+
+    # ==================== 用户设置相关方法 ====================
+    
+    def _get_settings_id(self, operator_id: str, username: str) -> str:
+        """生成用户设置的唯一 ID"""
+        return f"settings-{operator_id or 'default'}-{username or 'default'}"
+
+    def get_user_settings(self, operator_id: str = "", username: str = "") -> Dict[str, Any]:
+        """获取用户设置，如果没有则返回默认值"""
+        settings_id = self._get_settings_id(operator_id, username)
+        data = self.user_settings.get(ids=[settings_id])
+        if data and data.get("ids"):
+            doc = (data.get("documents") or [None])[0]
+            if doc:
+                try:
+                    return json.loads(doc)
+                except Exception:
+                    pass
+        # 返回默认设置
+        return self.get_default_settings()
+
+    def get_default_settings(self) -> Dict[str, Any]:
+        """获取默认设置（从环境变量读取）"""
+        return {
+            "auto_pin_enabled": os.getenv("ANALYTICS_AUTO_PIN_ENABLED", "true").lower() == "true",
+            "auto_pin_require_helpful": os.getenv("ANALYTICS_AUTO_PIN_REQUIRE_HELPFUL", "true").lower() == "true",
+            "auto_pin_limit": int(os.getenv("ANALYTICS_AUTO_PIN_LIMIT", "3")),
+            "auto_pin_days": int(os.getenv("ANALYTICS_AUTO_PIN_DAYS", "7")),
+            "dedup_enabled": os.getenv("ANALYTICS_PIN_DEDUP_ENABLED", "true").lower() == "true",
+            "dedup_threshold": float(os.getenv("ANALYTICS_PIN_DEDUP_THRESHOLD", "0.70")),
+            "dedup_mode": os.getenv("ANALYTICS_PIN_DEDUP_MODE", "rule").lower(),
+            "max_pins": 6,
+            "insight_enabled": os.getenv("ANALYTICS_INSIGHT_ENABLED", "true").lower() == "true",
+        }
+
+    def save_user_settings(self, settings: Dict[str, Any], operator_id: str = "", username: str = "") -> Dict[str, Any]:
+        """保存用户设置"""
+        settings_id = self._get_settings_id(operator_id, username)
+        # 合并默认设置，确保所有字段都有值
+        default = self.get_default_settings()
+        merged = {**default, **settings}
+        merged["updated_at"] = self._now()
+        
+        self.user_settings.upsert(
+            ids=[settings_id],
+            documents=[json.dumps(merged, ensure_ascii=False)],
+            metadatas=[{"operator_id": operator_id or "", "username": username or ""}],
+        )
+        return merged
 
     def update_pinned(self, message_id: str, payload: Dict[str, Any], operator_id: str = "", username: str = "") -> None:
         self.pins.upsert(
@@ -872,10 +1021,135 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
         print(f"[DEBUG] 相似度过滤: {len(documents)}条 -> {len(filtered_docs)}条 (阈值={threshold})")
         return filtered_docs
 
-    def detect_intent(self, text: str) -> Dict[str, str]:
+    def detect_intent(self, text: str, use_ai: bool = None) -> Dict[str, str]:
         """
-        简单意图识别（规则优先）
+        智能意图识别（支持AI模型和规则两种模式）
         返回: intent, preferred_chart, time_grain, agg_hint
+        
+        Args:
+            text: 用户问题文本
+            use_ai: 是否使用AI模型进行意图识别（None时根据环境变量决定）
+        """
+        # 如果未指定use_ai，则从环境变量读取配置
+        if use_ai is None:
+            use_ai = os.getenv("USE_AI_INTENT_DETECTION", "false").lower() == "true"
+        
+        # 如果启用AI意图识别，优先使用AI模型
+        if use_ai:
+            try:
+                ai_result = self._detect_intent_with_ai(text)
+                if ai_result:
+                    print(f"[DEBUG] AI意图识别结果: {ai_result}")
+                    return ai_result
+                else:
+                    print(f"[DEBUG] AI意图识别失败，回退到规则模式")
+            except Exception as e:
+                print(f"[DEBUG] AI意图识别异常: {e}，回退到规则模式")
+        
+        # 回退到规则模式
+        return self._detect_intent_with_rules(text)
+    
+    def _detect_intent_with_ai(self, text: str) -> Optional[Dict[str, str]]:
+        """
+        使用AI模型进行意图识别
+        """
+        api_key = os.getenv("ZHIPU_API_KEY")
+        model = os.getenv("ZHIPU_YULIAO_MODEL", "GLM-4-Flash")
+        
+        if not api_key or not model:
+            return None
+        
+        try:
+            from zhipuai import ZhipuAI
+        except ImportError:
+            print("[DEBUG] ZhipuAI SDK未安装，无法使用AI意图识别")
+            return None
+        
+        client = ZhipuAI(api_key=api_key)
+        
+        # 构建意图识别prompt
+        prompt = f"""你是一个数据分析意图识别专家。请分析用户的问题，判断用户的查询意图。
+
+用户问题：{text}
+
+请按照以下JSON格式返回结果（只返回JSON，不要其他内容）：
+{{
+    "intent": "意图类型（trend/distribution/ranking/comparison/detail/aggregation）",
+    "preferred_chart": "推荐图表类型（line/bar/pie/table/scatter）",
+    "time_grain": "时间粒度（day/month/week/hour/''）",
+    "agg_hint": "聚合提示（sum/avg/count/''）",
+    "confidence": 0.95,
+    "reasoning": "简短说明识别理由"
+}}
+
+意图类型说明：
+- trend: 趋势分析（包含增长率、变化、走势、同比、环比等）
+- distribution: 分布占比（包含占比、比例、构成、份额等）
+- ranking: 排行榜（包含top、排名、排行、前几等）
+- comparison: 对比分析（包含对比、比较、差异等）
+- detail: 明细数据（明确要求查看明细、详情、列表等，且不含其他分析意图）
+- aggregation: 聚合统计（总数、平均值、计数等单一指标）
+
+图表类型说明：
+- line: 折线图（适用于趋势分析）
+- bar: 柱状图（适用于排行、对比）
+- pie: 饼图（适用于占比分布）
+- table: 表格（适用于明细数据）
+- scatter: 散点图（适用于相关性分析）
+
+重要规则：
+1. 如果问题中同时包含"明细"和"趋势/增长率"等词，应优先判断为trend而非detail
+2. "增长率"、"增长"、"下降"、"上升"等都属于趋势分析
+3. 只有明确要求查看明细数据且不含任何分析意图时才判断为detail"""
+
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                max_tokens=500,
+                temperature=0.1,  # 低温度以获得更稳定的结果
+                top_p=0.7,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            
+            content = response.choices[0].message.content if response.choices else ""
+            if not content:
+                return None
+            
+            # 解析JSON响应
+            import json
+            # 尝试提取JSON（可能被markdown包裹）
+            content = content.strip()
+            if content.startswith("```"):
+                # 移除markdown代码块
+                lines = content.split("\n")
+                content = "\n".join([l for l in lines if not l.strip().startswith("```")])
+            
+            result = json.loads(content)
+            
+            # 验证必需字段
+            if not all(k in result for k in ["intent", "preferred_chart"]):
+                print(f"[DEBUG] AI返回结果缺少必需字段: {result}")
+                return None
+            
+            # 补充默认值
+            return {
+                "intent": result.get("intent", "detail"),
+                "preferred_chart": result.get("preferred_chart", "table"),
+                "time_grain": result.get("time_grain", ""),
+                "agg_hint": result.get("agg_hint", ""),
+                "confidence": result.get("confidence", 0.5),
+                "reasoning": result.get("reasoning", ""),
+            }
+            
+        except Exception as e:
+            print(f"[DEBUG] AI意图识别失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _detect_intent_with_rules(self, text: str) -> Dict[str, str]:
+        """
+        基于规则的意图识别（原有逻辑）
         """
         q = (text or "").lower()
         intent = "detail"
@@ -885,40 +1159,50 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
 
         # 关键词优先级调整：明细优先级最高
         detail_keywords = ["明细", "详情", "列表", "详细信息", "明细数据", "数据明细"]
-        trend_keywords = ["趋势", "变化", "走势", "曲线", "按日", "按月", "按周", "按小时", "同比", "环比"]
+        # 增加更多趋势关键词，包括增长率、下降、上升等
+        trend_keywords = ["趋势", "变化", "走势", "曲线", "按日", "按月", "按周", "按小时", "同比", "环比", 
+                         "增长率", "增长", "下降", "上升", "增速", "降幅", "涨幅"]
         distribution_keywords = ["分布", "占比", "比例", "构成", "份额"]
         compare_keywords = ["对比", "比较", "差异"]
         ranking_keywords = ["top", "排行", "排名", "前几"]
 
-        # 【优先级1】明细数据 - 必须优先判断
-        if any(k in q for k in detail_keywords):
+        # 【优先级1】明细数据 - 必须优先判断（且不与其他意图冲突）
+        # 只有明确提到明细关键词且不包含趋势、分布等关键词时才判定为明细
+        has_detail_keyword = any(k in q for k in detail_keywords)
+        has_trend_keyword = any(k in q for k in trend_keywords)
+        has_distribution_keyword = any(k in q for k in distribution_keywords)
+        has_compare_keyword = any(k in q for k in compare_keywords)
+        has_ranking_keyword = any(k in q for k in ranking_keywords)
+        
+        if has_detail_keyword and not (has_trend_keyword or has_distribution_keyword or has_compare_keyword or has_ranking_keyword):
             intent = "detail"
             preferred_chart = "table"
         # 【优先级2】排行数据
-        elif any(k in q for k in ranking_keywords):
+        elif has_ranking_keyword:
             intent = "ranking"
             preferred_chart = "bar"
-        # 【优先级3】趋势分析
-        elif any(k in q for k in trend_keywords):
+        # 【优先级3】趋势分析（包括增长率、变化等）
+        elif has_trend_keyword:
             intent = "trend"
             preferred_chart = "line"
             agg_hint = "sum"
         # 【优先级4】分布占比
-        elif any(k in q for k in distribution_keywords):
+        elif has_distribution_keyword:
             intent = "distribution"
             preferred_chart = "pie"
         # 【优先级5】对比分析
-        elif any(k in q for k in compare_keywords):
+        elif has_compare_keyword:
             intent = "comparison"
             preferred_chart = "bar"
 
-        if "按日" in q or "每日" in q or "日" in q:
+        # 时间粒度检测（更精确的匹配，避免误判）
+        if "按日" in q or "每日" in q:
             time_grain = "day"
-        elif "按月" in q or "每月" in q or "月" in q:
+        elif "按月" in q or "每月" in q:
             time_grain = "month"
-        elif "按周" in q or "每周" in q or "周" in q:
+        elif "按周" in q or "每周" in q:
             time_grain = "week"
-        elif "按小时" in q or "每小时" in q or "小时" in q:
+        elif "按小时" in q or "每小时" in q:
             time_grain = "hour"
 
         return {
@@ -940,10 +1224,18 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
         question_lower = question.lower()
         
         # 【优先级1】明细数据场景 - 不画图，返回 None
-        # 强匹配：如果问题中包含"明细"或"详情"，一定不画图
+        # 强匹配：只有明确包含明细关键词且不包含趋势、分布等关键词时才判定为明细
         strong_detail_keywords = ['明细', '详情', '列表', '详细信息', 'detail', 'list', 'records']
-        if any(kw in question_lower for kw in strong_detail_keywords):
-            print(f"[DEBUG] 检测到明细关键词，不生成图表")
+        trend_keywords_check = ['趋势', '变化', '走势', '增长率', '增长', '下降', '上升', '增速', '降幅', '涨幅', '同比', '环比']
+        distribution_keywords_check = ['占比', '比例', '分布', 'proportion', 'distribution', '构成']
+        
+        has_detail = any(kw in question_lower for kw in strong_detail_keywords)
+        has_trend = any(kw in question_lower for kw in trend_keywords_check)
+        has_distribution = any(kw in question_lower for kw in distribution_keywords_check)
+        
+        # 只有明确是明细且不是趋势/分布时才不画图
+        if has_detail and not (has_trend or has_distribution):
+            print(f"[DEBUG] 检测到明细关键词且无趋势/分布关键词，不生成图表")
             return None  # 明细数据不应该画图
         
         # 【优先级2】单值场景
@@ -962,7 +1254,9 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
                 return "Bar Chart (px.bar) - 柱状图"
         
         # 【优先级5】时间序列场景（趋势分析）
-        trend_keywords = ['趋势', '变化', '走势', '曲线', 'trend', '按日', '按月', '按周']
+        # 增加更多趋势关键词：增长率、增长、下降、上升等
+        trend_keywords = ['趋势', '变化', '走势', '曲线', 'trend', '按日', '按月', '按周', 
+                         '增长率', '增长', '下降', '上升', '增速', '降幅', '涨幅', '同比', '环比']
         if datetime_cols or any(kw in question_lower for kw in trend_keywords):
             return "Line Chart (px.line) - 时间序列折线图"
         
@@ -1411,10 +1705,11 @@ Generate code now (code only, no explanations):
                 "5. 如果提供的上下文不足，请用中文解释为什么无法生成。\n"
                 f"6. 确保输出的 SQL 符合 {self.dialect} 标准且可执行。\n"
                 "7. **MySQL关键提示**: 不要使用带格式字符串的 `UNIX_TIMESTAMP`（例如 `UNIX_TIMESTAMP(col, '%Y-%m-%d')` 是无效的）。`UNIX_TIMESTAMP()` 只接受 0 或 1 个参数。要格式化时间戳，请使用 `DATE_FORMAT(FROM_UNIXTIME(timestamp_col/1000), '%Y-%m-%d')`（如果是毫秒）或 `DATE_FORMAT(FROM_UNIXTIME(timestamp_col), '%Y-%m-%d')`（如果是秒）。\n"
-                "8. **语言要求**: 所有解释和说明文字必须使用中文。\n"
-                "9. **多数据库架构要求**: 本系统使用多数据库架构，SQL中的所有表名必须使用完全限定格式 `数据库名.表名`（例如: `SELECT * FROM database_name.table_name`）。绝不能省略数据库名，否则会导致执行错误。\n"
-                "10. **严禁参数化查询占位符**: SQL查询必须是完整可执行的语句，不要使用参数占位符如 `?` 或 `:param`。所有值必须直接嵌入SQL中（字符串用单引号包裹）。\n"
-                "11. **对话上下文**: 如果用户的问题中出现\"11月\"、\"上个月\"、\"本月\"等相对时间表述，请结合之前的对话历史和当前时间信息来理解用户的意图。\n"
+                "8. **MariaDB兼容**: 不要使用窗口函数（如 LAG/LEAD/OVER）。需要前一日/环比/同比时，用子查询或自连接实现。\n"
+                "9. **语言要求**: 所有解释和说明文字必须使用中文。\n"
+                "10. **多数据库架构要求**: 本系统使用多数据库架构，SQL中的所有表名必须使用完全限定格式 `数据库名.表名`（例如: `SELECT * FROM database_name.table_name`）。绝不能省略数据库名，否则会导致执行错误。\n"
+                "11. **严禁参数化查询占位符**: SQL查询必须是完整可执行的语句，不要使用参数占位符如 `?` 或 `:param`。所有值必须直接嵌入SQL中（字符串用单引号包裹）。\n"
+                "12. **对话上下文**: 如果用户的问题中出现\"11月\"、\"上个月\"、\"本月\"等相对时间表述，请结合之前的对话历史和当前时间信息来理解用户的意图。\n"
             )
         else:
             initial_prompt += (
@@ -1428,22 +1723,23 @@ Generate code now (code only, no explanations):
                 "5. If the provided context is insufficient, please explain in English why it can't be generated. \n"
                 f"6. Ensure that the output SQL is {self.dialect}-compliant and executable. \n"
                 "7. **CRITICAL for MySQL**: DO NOT use `UNIX_TIMESTAMP` with a format string (e.g., `UNIX_TIMESTAMP(col, '%Y-%m-%d')` is INVALID). `UNIX_TIMESTAMP()` only accepts 0 or 1 argument. To format a timestamp, use `DATE_FORMAT(FROM_UNIXTIME(timestamp_col/1000), '%Y-%m-%d')` (if ms) or `DATE_FORMAT(FROM_UNIXTIME(timestamp_col), '%Y-%m-%d')` (if seconds). \n"
-                "8. **Language requirement**: All explanations must be in English. \n"
-                "9. **Multi-Database Architecture Requirement**: This system uses a multi-database architecture. ALL table names in SQL queries MUST use the fully qualified format `database_name.table_name` (e.g., `SELECT * FROM database_name.table_name`). Never omit the database name or the query will fail. \n"
-                "10. **NO Parameterized Queries**: The SQL must be a complete executable statement. DO NOT use parameter placeholders like `?` or `:param`. All values must be embedded directly in the SQL (strings wrapped in single quotes). \n"
-                "11. **Conversation Context**: If the user mentions relative time expressions like \"last month\" or \"this month\", use the conversation history and current time information to understand their intent. \n"
+                "8. **MariaDB compatibility**: Do NOT use window functions (e.g., LAG/LEAD/OVER). For previous-day or period-over-period comparisons, use subqueries or self-joins. \n"
+                "9. **Language requirement**: All explanations must be in English. \n"
+                "10. **Multi-Database Architecture Requirement**: This system uses a multi-database architecture. ALL table names in SQL queries MUST use the fully qualified format `database_name.table_name` (e.g., `SELECT * FROM database_name.table_name`). Never omit the database name or the query will fail. \n"
+                "11. **NO Parameterized Queries**: The SQL must be a complete executable statement. DO NOT use parameter placeholders like `?` or `:param`. All values must be embedded directly in the SQL (strings wrapped in single quotes). \n"
+                "12. **Conversation Context**: If the user mentions relative time expressions like \"last month\" or \"this month\", use the conversation history and current time information to understand their intent. \n"
             )
 
         # 意图增强提示（趋势类强约束）
         if intent and intent.get("intent") == "trend":
             if user_lang == 'zh':
                 initial_prompt += (
-                    "12. **趋势类SQL强制要求**: 必须包含时间维度字段（如日期/时间列），并进行聚合统计（如 SUM/COUNT/AVG），"
+                    "13. **趋势类SQL强制要求**: 必须包含时间维度字段（如日期/时间列），并进行聚合统计（如 SUM/COUNT/AVG），"
                     "且必须包含 `GROUP BY 时间字段` 与 `ORDER BY 时间字段`，按时间升序排列。\n"
                 )
             else:
                 initial_prompt += (
-                    "12. **Trend SQL requirements**: Must include a time dimension column, an aggregate metric (SUM/COUNT/AVG), "
+                    "13. **Trend SQL requirements**: Must include a time dimension column, an aggregate metric (SUM/COUNT/AVG), "
                     "and include `GROUP BY time` plus `ORDER BY time` in ascending order.\n"
                 )
 
@@ -2335,8 +2631,9 @@ def _refresh_pinned_item(pinned: Dict[str, Any], operator_id: str = "") -> Dict[
             username=pinned.get("username", ""),
         )
 
-        insights_enabled = os.getenv("ANALYTICS_INSIGHT_ENABLED", "true").lower() == "true"
-        if insights_enabled:
+        # 使用用户设置判断是否启用洞察
+        user_settings = conversation_history.get_user_settings(operator_id=operator_id, username=pinned.get("username", ""))
+        if user_settings.get("insight_enabled", True):
             get_insight_engine().generate_insights_from_result(
                 result_rows=result_rows,
                 columns=columns,
@@ -2464,8 +2761,10 @@ def _is_better_pinned(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
 
 
 def _dedupe_pinned_items(items: List[Dict[str, Any]], threshold: float, mode: str) -> List[Dict[str, Any]]:
+    """对 pinned 图表进行去重，保留最优的一个"""
     if not items:
         return items
+    print(f"[DEBUG _dedupe_pinned_items] 输入 {len(items)} 条，阈值={threshold}, 模式={mode}")
     if mode == "ai":
         keys = [_build_pinned_similarity_text(item) for item in items]
         try:
@@ -2505,6 +2804,7 @@ def _dedupe_pinned_items(items: List[Dict[str, Any]], threshold: float, mode: st
                 groups.append({"key": key, "best": item})
     deduped = [group["best"] for group in groups]
     deduped.sort(key=lambda x: x.get("position", 0))
+    print(f"[DEBUG _dedupe_pinned_items] 去重后 {len(deduped)} 条（去除 {len(items) - len(deduped)} 条重复）")
     return deduped
 
 
@@ -2523,18 +2823,25 @@ def _refresh_all_pinned() -> None:
 
 
 def _auto_pin_recent(operator_id: str, username: str = "") -> None:
-    if os.getenv("ANALYTICS_AUTO_PIN_ENABLED", "true").lower() != "true":
+    # 读取用户设置
+    user_settings = conversation_history.get_user_settings(operator_id=operator_id, username=username)
+    
+    if not user_settings.get("auto_pin_enabled", True):
         return
-    max_total = 6
-    max_auto = int(os.getenv("ANALYTICS_AUTO_PIN_LIMIT", "3"))
-    recent_days = int(os.getenv("ANALYTICS_AUTO_PIN_DAYS", "7"))
+    
+    max_total = user_settings.get("max_pins", 6)
+    max_auto = user_settings.get("auto_pin_limit", 3)
+    recent_days = user_settings.get("auto_pin_days", 7)
+    dedup_enabled = user_settings.get("dedup_enabled", True)
+    dedup_threshold = user_settings.get("dedup_threshold", 0.70)
+    dedup_mode = user_settings.get("dedup_mode", "rule").lower()
+    require_helpful = user_settings.get("auto_pin_require_helpful", True)
+    
     pinned_items = conversation_history.list_pinned(operator_id=operator_id, username=username)
     if len(pinned_items) >= max_total:
         return
     pinned_ids = {item.get("message_id") for item in pinned_items}
-    dedup_enabled = os.getenv("ANALYTICS_PIN_DEDUP_ENABLED", "true").lower() == "true"
-    dedup_threshold = float(os.getenv("ANALYTICS_PIN_DEDUP_THRESHOLD", "0.86"))
-    dedup_mode = os.getenv("ANALYTICS_PIN_DEDUP_MODE", "rule").lower()
+    
     existing_keys = []
     for item in pinned_items:
         key = _build_pinned_similarity_text(item)
@@ -2555,6 +2862,7 @@ def _auto_pin_recent(operator_id: str, username: str = "") -> None:
         since_days=recent_days,
     )
     candidates = []
+    
     for msg in recent_messages:
         if msg.get("role") != "assistant":
             continue
@@ -2563,6 +2871,13 @@ def _auto_pin_recent(operator_id: str, username: str = "") -> None:
         if not msg.get("sql"):
             continue
         if msg.get("id") in pinned_ids:
+            continue
+        # 检查是否在黑名单中（用户主动删除过）
+        if conversation_history.is_in_pin_blacklist(msg.get("id"), operator_id=operator_id, username=username):
+            print(f"[Analytics] 跳过黑名单消息: {msg.get('id')}")
+            continue
+        # 只有用户点击 helpful 的消息才能被自动 pin
+        if require_helpful and msg.get("feedback_type") != "up":
             continue
         candidate_key = _build_pinned_similarity_text(msg)
         if candidate_key:
@@ -2629,6 +2944,13 @@ def get_analytics_insights(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    
+    # 检查用户设置是否启用洞察
+    user_settings = conversation_history.get_user_settings(operator_id=operator_id, username=username)
+    if not user_settings.get("insight_enabled", True):
+        return {"items": [], "disabled": True}
+    
     items = get_insight_engine().list_insights(operator_id=operator_id, limit=limit)
     return {"items": items}
 
@@ -2652,6 +2974,157 @@ def delete_analytics_insight(
     return {"success": True}
 
 
+@app.post("/api/v0/analytics/insight-report")
+def generate_insight_report(
+    request_data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """根据看板数据生成AI洞察报告"""
+    operator_id = _require_operator_id(current_user)
+    dashboard_data = request_data.get("dashboard_data", [])
+    
+    if not dashboard_data:
+        return {"success": False, "error": "没有看板数据"}
+    
+    # 检查是否配置了AI API
+    api_key = os.getenv("ZHIPU_API_KEY")
+    model = os.getenv("ZHIPU_YULIAO_MODEL", "GLM-4.5")
+    
+    if not api_key:
+        return {"success": False, "error": "AI服务未配置，请联系管理员"}
+    
+    try:
+        from zhipuai import ZhipuAI
+        client = ZhipuAI(api_key=api_key)
+        
+        # 构建报告数据摘要
+        data_summary = []
+        for i, item in enumerate(dashboard_data[:6], 1):  # 最多处理6个图表
+            question = item.get("question", f"图表{i}")
+            columns = item.get("columns", [])
+            result = item.get("result", [])
+            
+            # 提取关键统计信息
+            summary = f"### 图表{i}: {question}\n"
+            summary += f"- 数据列: {', '.join(columns[:5])}\n"
+            summary += f"- 数据行数: {len(result)}\n"
+            
+            # 提取数值统计
+            if result and columns:
+                for col in columns[:3]:  # 最多分析前3列
+                    values = [row.get(col) for row in result if isinstance(row.get(col), (int, float))]
+                    if values:
+                        summary += f"- {col}: 最小={min(values):.2f}, 最大={max(values):.2f}, 平均={sum(values)/len(values):.2f}\n"
+                
+                # 添加样本数据
+                if len(result) > 0:
+                    summary += f"- 最新数据: {result[-1]}\n"
+            
+            data_summary.append(summary)
+        
+        report_date = datetime.now().strftime("%Y年%m月%d日")
+        
+        prompt = f"""你是一位资深的数据分析师，请根据以下看板数据生成一份专业的AI洞察报告。
+
+## 看板数据摘要
+
+{chr(10).join(data_summary)}
+
+## 报告要求
+
+请生成一份结构清晰、内容专业的中文洞察报告，包含以下部分：
+
+1. **报告概述** - 简要说明本次分析的数据范围和时间
+2. **核心指标分析** - 对每个图表的关键指标进行深入分析
+3. **趋势洞察** - 识别数据中的趋势、模式和异常
+4. **业务建议** - 基于数据分析给出可操作的业务建议
+5. **风险提示** - 指出需要关注的潜在风险点
+6. **总结** - 简要总结关键发现
+
+报告格式要求：
+- 使用Markdown格式
+- 语言简洁专业
+- 数据引用准确
+- 建议具体可行
+
+报告日期: {report_date}
+"""
+        
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=3000,
+            temperature=0.5,
+            top_p=0.8,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        
+        report_content = response.choices[0].message.content if response.choices else ""
+        
+        if not report_content:
+            return {"success": False, "error": "AI生成报告失败"}
+        
+        # 添加报告头部
+        final_report = f"""# AI 数据洞察报告
+
+**生成时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}  
+**数据来源**: ChatBI 看板  
+**分析图表数**: {len(dashboard_data)}
+
+---
+
+{report_content}
+
+---
+
+*本报告由 RedTea ChatBI AI 自动生成，仅供参考。*
+"""
+        
+        return {
+            "success": True,
+            "report": final_report,
+            "title": f"AI洞察报告_{datetime.now().strftime('%Y%m%d')}"
+        }
+        
+    except ImportError:
+        return {"success": False, "error": "AI SDK未安装，请联系管理员"}
+    except Exception as exc:
+        print(f"[ERROR] 生成AI洞察报告失败: {exc}")
+        return {"success": False, "error": f"报告生成失败: {str(exc)}"}
+
+
+# ==================== 用户设置 API ====================
+
+@app.get("/api/v0/settings")
+def get_settings(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取当前用户设置"""
+    operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    settings = conversation_history.get_user_settings(operator_id=operator_id, username=username)
+    return {"settings": settings}
+
+
+@app.put("/api/v0/settings")
+def update_settings(
+    settings_data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """更新用户设置"""
+    operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    settings = conversation_history.save_user_settings(settings_data, operator_id=operator_id, username=username)
+    return {"success": True, "settings": settings}
+
+
+@app.post("/api/v0/settings/reset")
+def reset_settings(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """重置用户设置为默认值"""
+    operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    default_settings = conversation_history.get_default_settings()
+    settings = conversation_history.save_user_settings(default_settings, operator_id=operator_id, username=username)
+    return {"success": True, "settings": settings}
+
+
 @app.get("/api/v0/analytics/pinned")
 def get_pinned_charts(
     refresh: bool = True,
@@ -2659,14 +3132,36 @@ def get_pinned_charts(
 ):
     operator_id = _require_operator_id(current_user)
     username = (current_user or {}).get("username", "")
-    _auto_pin_recent(operator_id, username=username)
+    
+    # 读取用户设置
+    user_settings = conversation_history.get_user_settings(operator_id=operator_id, username=username)
+    
+    try:
+        _auto_pin_recent(operator_id, username=username)
+    except Exception as e:
+        print(f"[ERROR get_pinned_charts] _auto_pin_recent 失败: {e}")
+    
     pinned_items = conversation_history.list_pinned(operator_id=operator_id, username=username)
+    
     if refresh:
-        pinned_items = [_refresh_pinned_item(item, operator_id=operator_id) for item in pinned_items]
-    if os.getenv("ANALYTICS_PIN_DEDUP_ENABLED", "true").lower() == "true":
-        dedup_threshold = float(os.getenv("ANALYTICS_PIN_DEDUP_THRESHOLD", "0.86"))
-        dedup_mode = os.getenv("ANALYTICS_PIN_DEDUP_MODE", "rule").lower()
-        pinned_items = _dedupe_pinned_items(pinned_items, dedup_threshold, dedup_mode)
+        refreshed_items = []
+        for item in pinned_items:
+            try:
+                refreshed_items.append(_refresh_pinned_item(item, operator_id=operator_id))
+            except Exception as e:
+                print(f"[ERROR get_pinned_charts] _refresh_pinned_item 失败: {e}, item={item.get('message_id')}")
+                refreshed_items.append(item)  # 保留原始数据
+        pinned_items = refreshed_items
+    
+    # 使用用户设置进行去重
+    if user_settings.get("dedup_enabled", True):
+        try:
+            dedup_threshold = user_settings.get("dedup_threshold", 0.70)
+            dedup_mode = user_settings.get("dedup_mode", "rule").lower()
+            pinned_items = _dedupe_pinned_items(pinned_items, dedup_threshold, dedup_mode)
+        except Exception as e:
+            print(f"[ERROR get_pinned_charts] _dedupe_pinned_items 失败: {e}")
+    
     return {"items": pinned_items}
 
 
@@ -2693,11 +3188,33 @@ def unpin_message(
     message_id: str,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
+    """删除单个 pinned 图表"""
     operator_id = _require_operator_id(current_user)
     username = (current_user or {}).get("username", "")
     success = conversation_history.unpin_message(message_id, operator_id=operator_id, username=username)
     return {
         "success": success,
+        "items": conversation_history.list_pinned(operator_id=operator_id, username=username),
+    }
+
+
+@app.delete("/api/v0/analytics/pinned")
+def clear_user_pins(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """清理当前用户所有 pinned 图表"""
+    operator_id = _require_operator_id(current_user)
+    username = (current_user or {}).get("username", "")
+    pinned_items = conversation_history.list_pinned(operator_id=operator_id, username=username)
+    cleared_count = 0
+    for item in pinned_items:
+        msg_id = item.get("message_id")
+        if msg_id:
+            conversation_history.unpin_message(msg_id, operator_id=operator_id, username=username)
+            cleared_count += 1
+    return {
+        "success": True,
+        "cleared": cleared_count,
         "items": conversation_history.list_pinned(operator_id=operator_id, username=username),
     }
 
@@ -2743,6 +3260,21 @@ def clear_analytics(current_user: Dict[str, Any] = Depends(get_current_user)):
             "events": cleared_events,
         },
     }
+
+
+@app.delete("/api/v0/analytics/pinned/all")
+def clear_all_pins(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """清理所有 pinned 数据（管理员功能，用于清理脏数据）"""
+    operator_id = _require_operator_id(current_user)
+    # 获取所有 pins 数据
+    all_data = conversation_history.pins.get()
+    all_ids = all_data.get("ids") if all_data else []
+    if not all_ids:
+        return {"success": True, "cleared": 0, "message": "没有数据需要清理"}
+    
+    # 删除所有
+    conversation_history.pins.delete(ids=all_ids)
+    return {"success": True, "cleared": len(all_ids), "message": f"已清理 {len(all_ids)} 条 pinned 数据"}
 
 @app.post("/api/v0/generate_questions")
 def generate_questions(current_user: Dict[str, Any] = Depends(get_current_user)):

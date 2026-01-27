@@ -195,13 +195,13 @@ SELECT
   service_type,
   activation_status,
   FROM_UNIXTIME(start_time/1000) as activation_time
-FROM tbl_watch_subscription
+FROM db_provision.tbl_watch_subscription
 WHERE activation_status = 'Active'
 ORDER BY start_time DESC",查询所有激活的副卡,"激活用户,副卡查询,Active"
 sql,"-- 统计最近30天的活跃用户数
 SELECT 
   COUNT(DISTINCT imsi) as active_user_count
-FROM tbl_watch_subscription
+FROM db_provision.tbl_watch_subscription
 WHERE activation_status = 'Active'
   AND FROM_UNIXTIME(update_at/1000) >= DATE_SUB(NOW(), INTERVAL 30 DAY)",最近30天有多少活跃用户,"活跃用户统计,30天,用户数量"
 sql,"-- 查询某主卡的所有副卡
@@ -212,7 +212,7 @@ SELECT
   w.service_type,
   w.iccid_status,
   FROM_UNIXTIME(w.create_at/1000) as create_time
-FROM tbl_watch_subscription w
+FROM db_provision.tbl_watch_subscription w
 WHERE w.primary_imsi = ?
 ORDER BY w.create_at DESC",查询某个主卡下的所有副卡,"主副卡关联,副卡列表"
 sql,"-- 查询已启用VoLTE的用户
@@ -222,7 +222,7 @@ SELECT
   provisioning_status,
   create_at,
   update_at
-FROM tbl_volte_service
+FROM db_provision.tbl_volte_service
 WHERE provisioning_status = 6100",查询VoLTE已启用的用户,"VoLTE,已启用,6100"
 sql,"-- 查询VoLTE开通失败的用户
 SELECT 
@@ -230,7 +230,7 @@ SELECT
   msisdn,
   provisioning_status,
   update_at
-FROM tbl_volte_service
+FROM db_provision.tbl_volte_service
 WHERE provisioning_status = 6102
 ORDER BY update_at DESC",VoLTE开通失败的用户有哪些,"VoLTE,开通失败,6102"
 sql,"-- 查询VoWiFi已预配且用户已同意条款的
@@ -241,7 +241,7 @@ SELECT
   tc_status,
   address_status,
   update_at
-FROM tbl_vowifi_service
+FROM db_provision.tbl_vowifi_service
 WHERE provisioning_status = 1
   AND tc_status = 1",VoWiFi已预配且用户同意条款的,"VoWiFi,已预配,TC状态"
 sql,"-- 统计AAA鉴权成功率(最近1小时)
@@ -249,14 +249,14 @@ SELECT
   SUM(CASE WHEN result_code = 0 THEN 1 ELSE 0 END) as success_count,
   COUNT(*) as total_count,
   ROUND(SUM(CASE WHEN result_code = 0 THEN 1 ELSE 0 END) / COUNT(*) * 100, 2) as success_rate
-FROM auth_log
+FROM db_stat.auth_log
 WHERE create_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)",最近1小时的AAA鉴权成功率,"鉴权成功率,AAA,成功率计算"
 sql,"-- 查询鉴权失败的用户(最近1小时,失败次数>3)
 SELECT 
   imsi,
   result_code,
   COUNT(*) as fail_count
-FROM auth_log
+FROM db_stat.auth_log
 WHERE result_code NOT IN (-1, 0, 1001)
   AND create_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
 GROUP BY imsi, result_code
@@ -268,7 +268,7 @@ SELECT
   collect_time,
   value,
   label
-FROM stat_hour
+FROM db_stat.stat_hour
 WHERE measure_type IN (
     'AAA_AUTH_COUNT',
     'AAA_AUTH_SUCC',
@@ -289,7 +289,7 @@ SELECT
      SUM(CASE WHEN measure_type = 'VoLTE_SERVICE_ENABLE_FAIL_COUNT' THEN value ELSE 0 END)) * 100, 
     2
   ) as success_rate
-FROM stat_hour
+FROM db_stat.stat_hour
 WHERE measure_type IN ('VoLTE_SERVICE_ENABLE_SUCC_COUNT', 'VoLTE_SERVICE_ENABLE_FAIL_COUNT')
   AND collect_time >= DATE_FORMAT(NOW() - INTERVAL 1 HOUR, '%Y%m%d%H')",VoLTE开通成功率是多少,"成功率,VoLTE,业务成功率"
 sql,"-- 查询用户的业务操作记录
@@ -300,7 +300,7 @@ SELECT
   result,
   reason,
   FROM_UNIXTIME(create_at/1000) as operation_time
-FROM biz_watch_log
+FROM db_provision.biz_watch_log
 WHERE (imsi = ? OR msisdn = ?)
   AND create_at >= UNIX_TIMESTAMP(NOW() - INTERVAL 7 DAY) * 1000
 ORDER BY create_at DESC
@@ -309,7 +309,7 @@ sql,"-- 统计每天的副卡激活数量(最近7天)
 SELECT 
   DATE(FROM_UNIXTIME(start_time/1000)) as activation_date,
   COUNT(*) as activation_count
-FROM tbl_watch_subscription
+FROM db_provision.tbl_watch_subscription
 WHERE activation_status = 'Active'
   AND FROM_UNIXTIME(start_time/1000) >= DATE_SUB(NOW(), INTERVAL 7 DAY)
 GROUP BY DATE(FROM_UNIXTIME(start_time/1000))
@@ -322,7 +322,7 @@ SELECT
   SUM(CASE WHEN activation_status = 'Active' THEN 1 ELSE 0 END) as active_count,
   SUM(CASE WHEN service_type = 1 THEN 1 ELSE 0 END) as multi_sim_count,
   SUM(CASE WHEN service_type = 0 THEN 1 ELSE 0 END) as standalone_count
-FROM tbl_watch_subscription
+FROM db_provision.tbl_watch_subscription
 WHERE primary_imsi IS NOT NULL
 GROUP BY primary_imsi, primary_msisdn
 HAVING secondary_count > 0
@@ -337,9 +337,9 @@ SELECT
   w.service_type,
   v.provisioning_status as volte_status,
   wifi.provisioning_status as vowifi_status
-FROM tbl_watch_subscription w
-LEFT JOIN tbl_volte_service v ON w.imsi = v.imsi
-LEFT JOIN tbl_vowifi_service wifi ON w.imsi = wifi.imsi
+FROM db_provision.tbl_watch_subscription w
+LEFT JOIN db_provision.tbl_volte_service v ON w.imsi = v.imsi
+LEFT JOIN db_provision.tbl_vowifi_service wifi ON w.imsi = wifi.imsi
 WHERE w.primary_imsi = ?
 ORDER BY w.create_at DESC",查询主卡关联的所有副卡及业务状态,"主副卡关联,多表JOIN,业务状态"
 sql,"-- 查询VoLTE已启用但VoWiFi未预配的用户
@@ -348,8 +348,8 @@ SELECT
   v.msisdn,
   v.provisioning_status as volte_status,
   COALESCE(w.provisioning_status, 0) as vowifi_status
-FROM tbl_volte_service v
-LEFT JOIN tbl_vowifi_service w ON v.imsi = w.imsi
+FROM db_provision.tbl_volte_service v
+LEFT JOIN db_provision.tbl_vowifi_service w ON v.imsi = w.imsi
 WHERE v.provisioning_status = 6100
   AND (w.provisioning_status IS NULL OR w.provisioning_status != 1)",VoLTE已启用但VoWiFi未预配的用户,"业务对比,VoLTE,VoWiFi"
 sql,"-- 统计业务操作失败率(最近1天,按action分组)
@@ -359,7 +359,7 @@ SELECT
   SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as success_count,
   SUM(CASE WHEN result = 'fail' THEN 1 ELSE 0 END) as fail_count,
   ROUND(SUM(CASE WHEN result = 'fail' THEN 1 ELSE 0 END) / COUNT(*) * 100, 2) as fail_rate
-FROM biz_watch_log
+FROM db_provision.biz_watch_log
 WHERE create_at >= UNIX_TIMESTAMP(NOW() - INTERVAL 1 DAY) * 1000
 GROUP BY action
 HAVING total_count > 10
@@ -371,13 +371,13 @@ SELECT
   w.activation_status,
   w.iccid_status,
   FROM_UNIXTIME(w.update_at/1000) as last_update_time,
-  (SELECT action FROM biz_watch_log 
+  (SELECT action FROM db_provision.biz_watch_log 
    WHERE imsi = w.imsi 
    ORDER BY create_at DESC LIMIT 1) as last_action,
-  (SELECT result FROM biz_watch_log 
+  (SELECT result FROM db_provision.biz_watch_log 
    WHERE imsi = w.imsi 
    ORDER BY create_at DESC LIMIT 1) as last_result
-FROM tbl_watch_subscription w
+FROM db_provision.tbl_watch_subscription w
 WHERE w.activation_status = 'Unusable'
 ORDER BY w.update_at DESC",查询异常状态的副卡及原因,"异常状态,Unusable,故障分析"
 documentation,"## 常见查询模式与SQL模板
@@ -691,285 +691,3 @@ documentation,"## 数据库命名规范
 - db_mgmt: 管理数据库 (用户管理、权限)
 
 **跨库查询注意:** 需要指定完整表名如 db_stat.auth_log",数据库命名规范,"命名规范,数据库设计,表命名"
-ddl,"-- db_provision.esim_transfer_data (eSIM转移数据表)
-CREATE TABLE `esim_transfer_data` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `imsi` varchar(15) DEFAULT NULL COMMENT 'imsi',
-  `iccid` varchar(20) DEFAULT NULL COMMENT 'iccid',
-  `msisdn` varchar(20) DEFAULT NULL COMMENT 'msisdn',
-  `eid` varchar(32) DEFAULT NULL COMMENT 'eid',
-  `imei` varchar(64) DEFAULT NULL COMMENT 'imei',
-  `meid` varchar(64) DEFAULT NULL COMMENT 'meid',
-  `source_device_imsi` varchar(15) DEFAULT NULL COMMENT 'source_device_imsi',
-  `device_type` varchar(10) DEFAULT NULL COMMENT '设备类型',
-  `terminal_type` varchar(64) DEFAULT NULL COMMENT '终端类型',
-  `transfer_type` varchar(64) DEFAULT NULL COMMENT '转移类型',
-  `create_time` bigint(20) DEFAULT NULL COMMENT '创建时间',
-  `update_time` bigint(20) DEFAULT NULL COMMENT '更新时间',
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `imsi` (`imsi`) USING BTREE,
-  KEY `msisdn` (`msisdn`) USING BTREE,
-  KEY `source_device_imsi` (`source_device_imsi`) USING BTREE,
-  KEY `update_time_index` (`update_time` DESC) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;",,eSIM转移数据表DDL
-ddl,"-- db_provision.esim_transfer_log (eSIM转移日志表)
-CREATE TABLE `esim_transfer_log` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `source_imsi` varchar(64) DEFAULT NULL COMMENT 'imsi',
-  `msisdn` varchar(64) DEFAULT NULL COMMENT 'msisdn',
-  `source_iccid` varchar(20) DEFAULT NULL COMMENT '原设备iccid',
-  `source_eid` varchar(32) DEFAULT NULL COMMENT '原设备eid',
-  `source_imei` varchar(64) DEFAULT NULL COMMENT '原设备imei',
-  `source_terminal_type` varchar(64) DEFAULT NULL COMMENT '终端类型',
-  `target_imsi` varchar(64) DEFAULT NULL COMMENT '目标设备imsi',
-  `target_iccid` varchar(20) DEFAULT NULL COMMENT '目标设备iccid',
-  `target_eid` varchar(32) DEFAULT NULL COMMENT '目标设备eid',
-  `target_imei` varchar(64) DEFAULT NULL COMMENT '目标设备imei',
-  `target_terminal_type` varchar(64) DEFAULT NULL COMMENT '终端类型',
-  `transfer_type` varchar(64) DEFAULT NULL COMMENT '转移类型',
-  `result` varchar(255) DEFAULT NULL COMMENT '结果',
-  `reason` varchar(255) DEFAULT NULL COMMENT '原因',
-  `create_time` bigint(20) DEFAULT NULL COMMENT '创建时间',
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `imsi` (`source_imsi`) USING BTREE,
-  KEY `msisdn` (`msisdn`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC COMMENT='转移日志存储表';",,eSIM转移日志表DDL
-documentation,"## 核心表字段映射
-
-### esim_transfer_data (eSIM转移数据表, db_provision数据库)
-**用途:** 存储eSIM转移后的当前设备信息，记录用户最新的设备状态
-
-**用户/设备标识字段：**
-- imsi: 当前IMSI (varchar(15))
-- iccid: 当前ICCID (varchar(20))
-- msisdn: 手机号 (varchar(20))
-- eid: 设备EID (varchar(32))
-- imei: 设备IMEI (varchar(64))
-- meid: 设备MEID (varchar(64))
-
-**转移相关字段：**
-- source_device_imsi: 来源设备的IMSI (varchar(15), 有索引)
-  * 用于追溯该用户是从哪个设备转移过来的
-- device_type: 设备类型 (varchar(10))
-  * 如：'phone', 'watch', 'tablet'等
-- terminal_type: 终端类型 (varchar(64))
-  * 更详细的终端型号描述
-- transfer_type: 转移类型 (varchar(64))
-  * 如：'device_change'(换机), 'sim_transfer'(卡转移)等
-
-**时间字段：**
-- create_time: 创建时间 (bigint毫秒时间戳)
-- update_time: 更新时间 (bigint毫秒时间戳, 有降序索引)
-
-**索引字段：** imsi, msisdn, source_device_imsi, update_time都有索引，适合WHERE条件",esim_transfer_data表有哪些字段,"eSIM转移,设备信息,表结构"
-documentation,"## 核心表字段映射
-
-### esim_transfer_log (eSIM转移日志表, db_provision数据库)
-**用途:** 记录eSIM转移操作的完整历史，包含源设备和目标设备的详细信息
-
-**源设备字段(source_开头)：**
-- source_imsi: 原设备IMSI (varchar(64), 有索引)
-- source_iccid: 原设备ICCID (varchar(20))
-- source_eid: 原设备EID (varchar(32))
-- source_imei: 原设备IMEI (varchar(64))
-- source_terminal_type: 原设备终端类型 (varchar(64))
-
-**目标设备字段(target_开头)：**
-- target_imsi: 目标设备IMSI (varchar(64))
-- target_iccid: 目标设备ICCID (varchar(20))
-- target_eid: 目标设备EID (varchar(32))
-- target_imei: 目标设备IMEI (varchar(64))
-- target_terminal_type: 目标设备终端类型 (varchar(64))
-
-**通用字段：**
-- msisdn: 手机号 (varchar(64), 有索引)
-- transfer_type: 转移类型 (varchar(64))
-
-**结果字段：**
-- result: 操作结果 (varchar(255))
-  * 如：'success', 'fail'等
-- reason: 失败/操作原因 (varchar(255))
-
-**时间字段：**
-- create_time: 创建时间 (bigint毫秒时间戳)
-
-**索引字段：** source_imsi, msisdn有索引，适合WHERE条件",esim_transfer_log表有哪些字段,"eSIM转移日志,操作历史,表结构"
-documentation,"## eSIM转移业务场景与表映射
-
-### 查询eSIM转移相关
-- 问题：'查询eSIM转移记录' / '设备转移历史' / '换机记录'
-- 主表：esim_transfer_data, esim_transfer_log
-- 关键字段：imsi, msisdn, source_imsi, target_imsi, transfer_type, result
-- 常用条件：result='success'(成功), transfer_type='device_change'(换机)
-
-### esim_transfer_data vs esim_transfer_log 区别
-**esim_transfer_data (当前状态):**
-- 存储用户当前的设备信息
-- 每个用户(imsi/msisdn)只有一条记录
-- 通过source_device_imsi可追溯来源设备
-- 适合查询：当前设备信息、最新转移结果
-
-**esim_transfer_log (历史日志):**
-- 存储每次转移操作的完整记录
-- 每次转移操作生成一条记录
-- 包含源设备和目标设备的完整信息
-- 包含操作结果(result)和原因(reason)
-- 适合查询：转移历史、失败分析、设备变更轨迹
-
-### 典型业务场景
-1. 查询用户换机历史 → esim_transfer_log
-2. 查询当前设备信息 → esim_transfer_data
-3. 分析转移失败原因 → esim_transfer_log WHERE result='fail'
-4. 统计转移成功率 → esim_transfer_log GROUP BY result",eSIM转移相关查哪个表,"eSIM转移,表选择,业务场景"
-sql,"-- 查询所有eSIM转移记录
-SELECT 
-  id,
-  imsi,
-  msisdn,
-  eid,
-  imei,
-  source_device_imsi,
-  device_type,
-  terminal_type,
-  transfer_type,
-  FROM_UNIXTIME(create_time/1000) as create_time,
-  FROM_UNIXTIME(update_time/1000) as update_time
-FROM esim_transfer_data
-ORDER BY update_time DESC",查询所有eSIM转移记录,"eSIM转移,设备列表"
-sql,"-- 查询某用户的eSIM转移信息
-SELECT 
-  imsi,
-  msisdn,
-  iccid,
-  eid,
-  imei,
-  meid,
-  source_device_imsi,
-  device_type,
-  terminal_type,
-  transfer_type,
-  FROM_UNIXTIME(create_time/1000) as create_time,
-  FROM_UNIXTIME(update_time/1000) as update_time
-FROM esim_transfer_data
-WHERE imsi = ? OR msisdn = ?",查询某用户的eSIM转移信息,"用户查询,设备信息"
-sql,"-- 查询eSIM转移日志(最近7天)
-SELECT 
-  source_imsi,
-  msisdn,
-  source_terminal_type,
-  target_imsi,
-  target_terminal_type,
-  transfer_type,
-  result,
-  reason,
-  FROM_UNIXTIME(create_time/1000) as transfer_time
-FROM esim_transfer_log
-WHERE create_time >= UNIX_TIMESTAMP(NOW() - INTERVAL 7 DAY) * 1000
-ORDER BY create_time DESC",查询最近7天的eSIM转移日志,"转移日志,历史记录"
-sql,"-- 查询eSIM转移失败的记录
-SELECT 
-  source_imsi,
-  msisdn,
-  source_terminal_type,
-  target_imsi,
-  target_terminal_type,
-  transfer_type,
-  result,
-  reason,
-  FROM_UNIXTIME(create_time/1000) as transfer_time
-FROM esim_transfer_log
-WHERE result = 'fail'
-ORDER BY create_time DESC",查询eSIM转移失败的记录,"转移失败,异常分析"
-sql,"-- 统计eSIM转移成功率(最近30天)
-SELECT 
-  COUNT(*) as total_count,
-  SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as success_count,
-  SUM(CASE WHEN result = 'fail' THEN 1 ELSE 0 END) as fail_count,
-  ROUND(SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) / COUNT(*) * 100, 2) as success_rate
-FROM esim_transfer_log
-WHERE create_time >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY) * 1000",eSIM转移成功率是多少,"成功率,转移统计"
-sql,"-- 按转移类型统计eSIM转移数量
-SELECT 
-  transfer_type,
-  COUNT(*) as transfer_count,
-  SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as success_count,
-  SUM(CASE WHEN result = 'fail' THEN 1 ELSE 0 END) as fail_count
-FROM esim_transfer_log
-WHERE create_time >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY) * 1000
-GROUP BY transfer_type
-ORDER BY transfer_count DESC",按转移类型统计eSIM转移数量,"转移类型,分组统计"
-sql,"-- 按设备类型统计eSIM转移分布
-SELECT 
-  device_type,
-  terminal_type,
-  COUNT(*) as device_count
-FROM esim_transfer_data
-GROUP BY device_type, terminal_type
-ORDER BY device_count DESC",按设备类型统计eSIM转移分布,"设备类型,分布统计"
-sql,"-- 查询某用户的完整转移历史
-SELECT 
-  source_imsi,
-  source_iccid,
-  source_eid,
-  source_imei,
-  source_terminal_type,
-  target_imsi,
-  target_iccid,
-  target_eid,
-  target_imei,
-  target_terminal_type,
-  transfer_type,
-  result,
-  reason,
-  FROM_UNIXTIME(create_time/1000) as transfer_time
-FROM esim_transfer_log
-WHERE msisdn = ? OR source_imsi = ? OR target_imsi = ?
-ORDER BY create_time DESC",查询某用户的eSIM转移历史,"用户历史,设备变更"
-sql,"-- 统计每天的eSIM转移数量(最近7天)
-SELECT 
-  DATE(FROM_UNIXTIME(create_time/1000)) as transfer_date,
-  COUNT(*) as transfer_count,
-  SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as success_count,
-  SUM(CASE WHEN result = 'fail' THEN 1 ELSE 0 END) as fail_count
-FROM esim_transfer_log
-WHERE create_time >= UNIX_TIMESTAMP(NOW() - INTERVAL 7 DAY) * 1000
-GROUP BY DATE(FROM_UNIXTIME(create_time/1000))
-ORDER BY transfer_date DESC",最近7天每天的eSIM转移数量,"每日统计,趋势分析"
-sql,"-- 查询从特定设备转移出去的记录
-SELECT 
-  source_imsi,
-  msisdn,
-  target_imsi,
-  target_eid,
-  target_imei,
-  target_terminal_type,
-  transfer_type,
-  result,
-  FROM_UNIXTIME(create_time/1000) as transfer_time
-FROM esim_transfer_log
-WHERE source_imsi = ?
-ORDER BY create_time DESC",查询从某设备转移出去的记录,"源设备,转移追踪"
-sql,"-- 查询转移到特定设备的记录
-SELECT 
-  source_imsi,
-  source_eid,
-  source_imei,
-  source_terminal_type,
-  msisdn,
-  target_imsi,
-  transfer_type,
-  result,
-  FROM_UNIXTIME(create_time/1000) as transfer_time
-FROM esim_transfer_log
-WHERE target_imsi = ?
-ORDER BY create_time DESC",查询转移到某设备的记录,"目标设备,转移追踪"
-sql,"-- 分析eSIM转移失败原因分布
-SELECT 
-  reason,
-  COUNT(*) as fail_count,
-  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as percentage
-FROM esim_transfer_log
-WHERE result = 'fail'
-  AND create_time >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY) * 1000
-GROUP BY reason
-ORDER BY fail_count DESC",分析eSIM转移失败原因,"失败原因,问题分析"

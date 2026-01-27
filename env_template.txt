@@ -1,0 +1,46 @@
+# === Database Config ===
+DB_HOST=your_db_host
+DB_PORT=3306
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
+DB_SSL_ENABLED=True
+
+# === AI Model Config ===
+ZHIPU_API_KEY=your_zhipu_api_key
+ZHIPU_API_BASE=https://open.bigmodel.cn/api/paas/v4
+ZHIPU_MODEL=GLM-4.7
+ZHIPU_YULIAO_MODEL=GLM-4.5
+
+# === AI Intent Detection (可选) ===
+# 是否启用AI意图识别（true/false，默认false使用规则模式）
+USE_AI_INTENT_DETECTION=false
+
+# === OpenRouter (SQL only) ===
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_API_BASE=https://openrouter.ai/api/v1
+OPENROUTER_SQL_MODEL=openai/gpt-5.1
+OPENROUTER_REFERER=
+OPENROUTER_APP_NAME=
+
+# === Lark Notification ===
+LARK_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/your_webhook_url
+
+# === Auth Config ===
+AUTH_ENABLED=true
+AUTH_TOKEN_TTL_SECONDS=86400
+
+# 账号列表（必须是单行 JSON，包含 username/password/operator_id）
+# 示例：多个用户用逗号分隔
+AUTH_USERS_JSON=[{"username":"admin","password":"admin123","operator_id":"op_001"},{"username":"user1","password":"pass123","operator_id":"op_002"}]
+
+# === Tenant Isolation ===
+ENABLE_TENANT_ISOLATION=true
+TENANT_COLUMN=operator_id
+
+# === Other Config ===
+SHOW_SQL_DEBUG=False
+
+# === RAG Optimization ===
+RAG_SQL_THRESHOLD=1.5
+RAG_DDL_THRESHOLD=1.5
+RAG_DOC_THRESHOLD=1.5

@@ -89,6 +89,28 @@ class InsightEngine:
         if llm_message:
             data = {**data, "rule_message": message}
             message = llm_message
+        
+        # 去重逻辑: 检查最近24小时内是否有相同标题和类型的洞察
+        existing_insight_id = self._find_duplicate_insight(
+            title=title,
+            insight_type=insight_type,
+            operator_id=operator_id,
+            hours=24
+        )
+        
+        if existing_insight_id:
+            # 更新现有洞察
+            self._update_insight(
+                insight_id=existing_insight_id,
+                message=message,
+                severity=severity,
+                category=category,
+                confidence=confidence,
+                data=data,
+            )
+            return
+        
+        # 创建新洞察
         insight_id = f"{insight_type}-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
         payload = Insight(
             insight_type=insight_type,
@@ -132,6 +154,81 @@ class InsightEngine:
             return 0
         self.collection.delete(ids=ids)
         return len(ids)
+
+    def _find_duplicate_insight(
+        self,
+        title: str,
+        insight_type: str,
+        operator_id: str = "",
+        hours: int = 24
+    ) -> Optional[str]:
+        """查找指定时间窗口内是否存在相同标题和类型的洞察"""
+        from datetime import timedelta
+        
+        if operator_id:
+            data = self.collection.get(where={"operator_id": operator_id})
+        else:
+            data = self.collection.get()
+        
+        if not data or not data.get("documents"):
+            return None
+        
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
+        for doc in data.get("documents", []):
+            try:
+                insight = json.loads(doc)
+                # 检查标题、类型和时间
+                if (insight.get("title") == title and 
+                    insight.get("insight_type") == insight_type):
+                    created_at = insight.get("created_at", "")
+                    if created_at:
+                        insight_time = datetime.fromisoformat(created_at)
+                        if insight_time >= cutoff_time:
+                            return insight.get("id")
+            except Exception:
+                continue
+        
+        return None
+    
+    def _update_insight(
+        self,
+        insight_id: str,
+        message: str,
+        severity: str,
+        category: str,
+        confidence: float,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """更新现有洞察"""
+        try:
+            existing_data = self.collection.get(ids=[insight_id])
+            if not existing_data or not existing_data.get("documents"):
+                return
+            
+            existing_doc = existing_data.get("documents", [])[0]
+            insight = json.loads(existing_doc)
+            
+            # 更新字段
+            insight["message"] = message
+            insight["severity"] = severity
+            insight["category"] = category
+            insight["confidence"] = confidence
+            insight["data"] = data or {}
+            insight["updated_at"] = datetime.now().isoformat()
+            
+            # 删除旧记录
+            self.collection.delete(ids=[insight_id])
+            
+            # 添加更新后的记录
+            metadata = existing_data.get("metadatas", [{}])[0]
+            self.collection.add(
+                ids=[insight_id],
+                documents=[json.dumps(insight, ensure_ascii=False)],
+                metadatas=[metadata],
+            )
+        except Exception as exc:
+            print(f"[InsightEngine] 更新洞察失败: {exc}")
 
     def _generate_llm_summary(self, title: str, message: str) -> Optional[str]:
         api_key = os.getenv("ZHIPU_API_KEY")

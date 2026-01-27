@@ -10,6 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@antv/g2plot/dist/g2plot.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <style>
         :root {
             --vanna-teal: #15a8a8;
@@ -324,6 +325,22 @@
             color: var(--vanna-text-dim);
             margin-bottom: 8px;
         }
+        .pinned-card-header > span {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-right: 8px;
+        }
+        .pinned-card-actions {
+            display: flex;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .pinned-card-actions .btn {
+            padding: 2px 6px;
+            font-size: 12px;
+        }
         .pinned-chart {
             width: 100%;
             min-height: 220px;
@@ -355,6 +372,72 @@
         .insight-card .insight-message {
             color: var(--vanna-text-dim);
             font-size: 14px;
+        }
+
+        /* 图表全屏模态框样式 */
+        .chart-fullscreen-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 9999;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .chart-fullscreen-modal.show {
+            display: flex;
+            flex-direction: column;
+        }
+        .chart-fullscreen-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            background: var(--vanna-surface);
+            border-radius: 16px 16px 0 0;
+            border-bottom: 1px solid var(--vanna-border);
+        }
+        .chart-fullscreen-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--vanna-text);
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .chart-fullscreen-close {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: none;
+            background: var(--vanna-bg);
+            color: var(--vanna-text-dim);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            font-size: 20px;
+        }
+        .chart-fullscreen-close:hover {
+            background: #fee2e2;
+            color: #ef4444;
+        }
+        .chart-fullscreen-body {
+            flex: 1;
+            background: var(--vanna-surface);
+            border-radius: 0 0 16px 16px;
+            padding: 24px;
+            overflow: hidden;
+        }
+        .chart-fullscreen-container {
+            width: 100%;
+            height: 100%;
+            min-height: 400px;
         }
 
         .type-badge { font-size: 11px; padding: 4px 8px; border-radius: 6px; font-weight: 600; text-transform: uppercase; }
@@ -790,6 +873,9 @@
                         <div class="text-muted small">自动汇总关键指标与趋势</div>
                     </div>
                     <div class="d-flex align-items-center gap-2">
+                        <button class="btn btn-sm btn-outline-primary rounded-pill px-3" onclick="showSettingsModal()">
+                            <i class="bi bi-gear me-1"></i>设置
+                        </button>
                         <button class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="clearInsights()">
                             <i class="bi bi-trash me-1"></i>清空洞察
                         </button>
@@ -819,7 +905,17 @@
                 </div>
 
                 <div class="analytics-section">
-                    <div class="section-title">我的看板</div>
+                    <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>我的看板</span>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="generateInsightReport()" title="生成AI洞察报告" id="generateReportBtn">
+                                <i class="bi bi-file-earmark-text"></i> AI洞察报告
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="clearAllPins()" title="清空看板">
+                                <i class="bi bi-trash"></i> 清空
+                            </button>
+                        </div>
+                    </div>
                     <div class="pinned-grid" id="pinnedGrid">
                         <div class="pinned-placeholder">从对话中点击 📌 Pin，即可加入看板</div>
                     </div>
@@ -1185,6 +1281,165 @@
         </div>
     </div>
 
+    <!-- 用户设置弹窗 -->
+    <div class="modal fade" id="settingsModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-gear me-2"></i>用户设置</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="settings-section mb-4">
+                        <h6 class="settings-section-title text-muted small fw-bold mb-3">
+                            <i class="bi bi-pin-angle me-1"></i>自动收藏设置
+                        </h6>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="settingAutoPinEnabled">
+                            <label class="form-check-label" for="settingAutoPinEnabled">
+                                启用自动收藏
+                                <small class="text-muted d-block">自动将优质图表添加到看板</small>
+                            </label>
+                        </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="settingRequireHelpful">
+                            <label class="form-check-label" for="settingRequireHelpful">
+                                仅收藏点赞内容
+                                <small class="text-muted d-block">只有点击"Helpful"的图表才会被自动收藏</small>
+                            </label>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-6">
+                                <label class="form-label small">最大收藏数量</label>
+                                <select class="form-select form-select-sm" id="settingMaxPins">
+                                    <option value="3">3 个</option>
+                                    <option value="6">6 个</option>
+                                    <option value="9">9 个</option>
+                                    <option value="12">12 个</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">自动收藏限制</label>
+                                <select class="form-select form-select-sm" id="settingAutoPinLimit">
+                                    <option value="1">最多 1 个</option>
+                                    <option value="2">最多 2 个</option>
+                                    <option value="3">最多 3 个</option>
+                                    <option value="5">最多 5 个</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small">考虑时间范围</label>
+                                <select class="form-select form-select-sm" id="settingAutoPinDays">
+                                    <option value="1">最近 1 天</option>
+                                    <option value="3">最近 3 天</option>
+                                    <option value="7">最近 7 天</option>
+                                    <option value="14">最近 14 天</option>
+                                    <option value="30">最近 30 天</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-section mb-4">
+                        <h6 class="settings-section-title text-muted small fw-bold mb-3">
+                            <i class="bi bi-layers me-1"></i>智能去重设置
+                        </h6>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="settingDedupEnabled">
+                            <label class="form-check-label" for="settingDedupEnabled">
+                                启用智能去重
+                                <small class="text-muted d-block">自动合并相似图表，避免重复</small>
+                            </label>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-6">
+                                <label class="form-label small">相似度阈值</label>
+                                <select class="form-select form-select-sm" id="settingDedupThreshold">
+                                    <option value="0.5">50% (宽松)</option>
+                                    <option value="0.6">60%</option>
+                                    <option value="0.7">70% (推荐)</option>
+                                    <option value="0.8">80%</option>
+                                    <option value="0.9">90% (严格)</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">去重模式</label>
+                                <select class="form-select form-select-sm" id="settingDedupMode">
+                                    <option value="rule">规则匹配</option>
+                                    <option value="ai">AI 语义</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-section">
+                        <h6 class="settings-section-title text-muted small fw-bold mb-3">
+                            <i class="bi bi-lightbulb me-1"></i>AI 洞察设置
+                        </h6>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="settingInsightEnabled">
+                            <label class="form-check-label" for="settingInsightEnabled">
+                                启用 AI 洞察
+                                <small class="text-muted d-block">自动分析数据并生成智能洞察建议</small>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary rounded-pill px-3" onclick="resetSettings()">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>恢复默认
+                    </button>
+                    <div>
+                        <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+                        <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="saveSettings()">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 图表全屏模态框 -->
+    <div id="chartFullscreenModal" class="chart-fullscreen-modal">
+        <div class="chart-fullscreen-header">
+            <span class="chart-fullscreen-title" id="fullscreenChartTitle">图表详情</span>
+            <button class="chart-fullscreen-close" onclick="closeChartFullscreen()" title="关闭">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+        <div class="chart-fullscreen-body">
+            <div id="fullscreenChartContainer" class="chart-fullscreen-container"></div>
+        </div>
+    </div>
+
+    <!-- AI洞察报告生成弹窗 -->
+    <div class="modal fade" id="insightReportModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-file-earmark-text me-2"></i>AI 洞察报告</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="reportContent" class="p-3" style="max-height: 60vh; overflow-y: auto;">
+                        <div class="text-center p-5 text-muted">
+                            <div class="spinner-border text-primary mb-3" role="status"></div>
+                            <p>正在生成AI洞察报告，请稍候...</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">关闭</button>
+                    <button type="button" class="btn btn-success rounded-pill px-4" onclick="downloadReport('md')" id="downloadMdBtn" disabled>
+                        <i class="bi bi-markdown me-1"></i>下载 Markdown
+                    </button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="downloadReport('html')" id="downloadHtmlBtn" disabled>
+                        <i class="bi bi-filetype-html me-1"></i>下载 HTML
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 登录页面 -->
     <div id="loginPage" class="login-page" style="display: none;">
         <div class="login-container">
@@ -1366,6 +1621,7 @@
         }
 
         async function initializeApp() {
+            await loadUserSettings();  // 加载用户设置
             await loadSessions();
             await loadChatSelectors();  // 加载数据源和知识库选择器
             const sessionsList = document.querySelectorAll('.session-item');
@@ -1530,6 +1786,133 @@
             }
         }
 
+        // ==================== 用户设置相关函数 ====================
+        let USER_SETTINGS = {};
+        let settingsModal = null;
+
+        async function loadUserSettings() {
+            try {
+                const res = await authFetch('/api/v0/settings');
+                const data = await res.json();
+                USER_SETTINGS = data.settings || {};
+                console.log('Loaded user settings:', USER_SETTINGS);
+            } catch (e) {
+                console.error('Failed to load settings', e);
+            }
+        }
+
+        function showSettingsModal() {
+            if (!settingsModal) {
+                settingsModal = new bootstrap.Modal(document.getElementById('settingsModal'));
+            }
+            // 填充当前设置到表单
+            document.getElementById('settingAutoPinEnabled').checked = USER_SETTINGS.auto_pin_enabled !== false;
+            document.getElementById('settingRequireHelpful').checked = USER_SETTINGS.auto_pin_require_helpful !== false;
+            document.getElementById('settingMaxPins').value = USER_SETTINGS.max_pins || 6;
+            document.getElementById('settingAutoPinLimit').value = USER_SETTINGS.auto_pin_limit || 3;
+            document.getElementById('settingAutoPinDays').value = USER_SETTINGS.auto_pin_days || 7;
+            document.getElementById('settingDedupEnabled').checked = USER_SETTINGS.dedup_enabled !== false;
+            document.getElementById('settingDedupThreshold').value = USER_SETTINGS.dedup_threshold || 0.7;
+            document.getElementById('settingDedupMode').value = USER_SETTINGS.dedup_mode || 'rule';
+            document.getElementById('settingInsightEnabled').checked = USER_SETTINGS.insight_enabled !== false;
+            settingsModal.show();
+        }
+
+        async function saveSettings() {
+            const newSettings = {
+                auto_pin_enabled: document.getElementById('settingAutoPinEnabled').checked,
+                auto_pin_require_helpful: document.getElementById('settingRequireHelpful').checked,
+                max_pins: parseInt(document.getElementById('settingMaxPins').value),
+                auto_pin_limit: parseInt(document.getElementById('settingAutoPinLimit').value),
+                auto_pin_days: parseInt(document.getElementById('settingAutoPinDays').value),
+                dedup_enabled: document.getElementById('settingDedupEnabled').checked,
+                dedup_threshold: parseFloat(document.getElementById('settingDedupThreshold').value),
+                dedup_mode: document.getElementById('settingDedupMode').value,
+                insight_enabled: document.getElementById('settingInsightEnabled').checked,
+            };
+            try {
+                const res = await authFetch('/api/v0/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newSettings)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    USER_SETTINGS = data.settings;
+                    settingsModal.hide();
+                    alert('设置已保存');
+                    // 刷新看板以应用新设置
+                    await loadPinnedCharts();
+                }
+            } catch (e) {
+                console.error('Failed to save settings', e);
+                alert('保存失败，请重试');
+            }
+        }
+
+        async function resetSettings() {
+            if (!confirm('确定要恢复默认设置吗？')) {
+                return;
+            }
+            try {
+                const res = await authFetch('/api/v0/settings/reset', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    USER_SETTINGS = data.settings;
+                    // 更新表单
+                    showSettingsModal();
+                    alert('已恢复默认设置');
+                }
+            } catch (e) {
+                console.error('Failed to reset settings', e);
+                alert('重置失败，请重试');
+            }
+        }
+
+        async function clearAllPins() {
+            if (!confirm('确定要清空所有看板图表吗？')) {
+                return;
+            }
+            try {
+                const res = await authFetch('/api/v0/analytics/pinned', { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    await loadPinnedCharts();
+                    // 更新聊天记录中的 pin 状态
+                    Object.keys(CHAT_HISTORY).forEach(id => {
+                        CHAT_HISTORY[id].pinned = false;
+                    });
+                    document.querySelectorAll('[data-pin-id]').forEach(btn => {
+                        btn.innerHTML = '<i class="bi bi-pin-angle"></i> Pin';
+                        btn.classList.remove('pinned');
+                    });
+                    alert(`已清空 ${data.cleared} 个图表`);
+                }
+            } catch (e) {
+                console.error('Clear pins error', e);
+                alert('清空失败，请重试');
+            }
+        }
+
+        async function removePinnedChart(messageId) {
+            console.log('removePinnedChart called with:', messageId);
+            try {
+                const res = await authFetch(`/api/v0/messages/${messageId}/pin`, { method: 'DELETE' });
+                const data = await res.json();
+                console.log('Remove pin response:', data);
+                if (data.success) {
+                    updatePinnedItems(data.items || []);
+                    await loadPinnedCharts();
+                } else {
+                    console.warn('Remove pin failed:', data);
+                    alert('移除失败：可能无权限或记录不存在');
+                }
+            } catch (e) {
+                console.error('Remove pin error', e);
+                alert('移除失败，请重试');
+            }
+        }
+
         async function loadPinnedCharts() {
             const container = document.getElementById('pinnedGrid');
             container.innerHTML = '<div class="pinned-placeholder">加载中...</div>';
@@ -1546,12 +1929,20 @@
                     return;
                 }
                 container.innerHTML = items.map(item => `
-                    <div class="pinned-card">
+                    <div class="pinned-card" data-pinned-item='${JSON.stringify({message_id: item.message_id, question: item.question, result: item.result, columns: item.columns, chart: item.chart}).replace(/'/g, "&#39;")}'>
                         <div class="pinned-card-header">
-                            <span>${item.question || '收藏图表'}</span>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="refreshPinnedChart('${item.message_id}')">
-                                <i class="bi bi-arrow-clockwise"></i>
-                            </button>
+                            <span title="${item.question || '收藏图表'}">${item.question || '收藏图表'}</span>
+                            <div class="pinned-card-actions">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="openChartFullscreen('${item.message_id}')" title="全屏查看">
+                                    <i class="bi bi-arrows-fullscreen"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="refreshPinnedChart('${item.message_id}')" title="刷新数据">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="removePinnedChart('${item.message_id}')" title="移除">
+                                    <i class="bi bi-x"></i>
+                                </button>
+                            </div>
                         </div>
                         <div id="pinned-chart-${item.message_id}" class="pinned-chart"></div>
                         <div class="text-muted small mt-2">刷新于 ${item.last_refreshed || '--'}</div>
@@ -1604,6 +1995,13 @@
             try {
                 const res = await authFetch('/api/v0/analytics/insights');
                 const data = await res.json();
+                
+                // 检查是否禁用了洞察功能
+                if (data.disabled) {
+                    container.innerHTML = '<div class="insight-placeholder"><i class="bi bi-lightbulb-off me-2"></i>AI 洞察已关闭，可在设置中开启</div>';
+                    return;
+                }
+                
                 const items = data.items || [];
                 if (items.length === 0) {
                     container.innerHTML = '<div class="insight-placeholder">暂无洞察数据</div>';
@@ -1694,6 +2092,697 @@
             } catch (e) {
                 console.error('Failed to refresh pinned chart', e);
             }
+        }
+
+        // 全屏图表相关变量
+        let currentFullscreenItem = null;
+        let fullscreenChartInstance = null;
+
+        function openChartFullscreen(messageId) {
+            const pinnedCard = document.querySelector(`[data-pinned-item*='"message_id":"${messageId}"']`);
+            if (!pinnedCard) {
+                console.error('Pinned card not found:', messageId);
+                return;
+            }
+            
+            try {
+                const itemData = JSON.parse(pinnedCard.getAttribute('data-pinned-item').replace(/&#39;/g, "'"));
+                currentFullscreenItem = itemData;
+                
+                const modal = document.getElementById('chartFullscreenModal');
+                const titleEl = document.getElementById('fullscreenChartTitle');
+                const container = document.getElementById('fullscreenChartContainer');
+                
+                titleEl.textContent = itemData.question || '收藏图表';
+                container.innerHTML = '';
+                modal.classList.add('show');
+                document.body.style.overflow = 'hidden';
+                
+                // 延迟渲染以确保容器尺寸正确
+                setTimeout(() => {
+                    renderFullscreenChart(container, itemData);
+                }, 100);
+                
+                // ESC键关闭
+                document.addEventListener('keydown', handleFullscreenEsc);
+            } catch (e) {
+                console.error('Failed to parse pinned item data:', e);
+            }
+        }
+
+        function handleFullscreenEsc(e) {
+            if (e.key === 'Escape') {
+                closeChartFullscreen();
+            }
+        }
+
+        function closeChartFullscreen() {
+            const modal = document.getElementById('chartFullscreenModal');
+            modal.classList.remove('show');
+            document.body.style.overflow = '';
+            document.removeEventListener('keydown', handleFullscreenEsc);
+            
+            // 清理图表实例
+            if (fullscreenChartInstance) {
+                if (typeof fullscreenChartInstance.destroy === 'function') {
+                    fullscreenChartInstance.destroy();
+                }
+                fullscreenChartInstance = null;
+            }
+            currentFullscreenItem = null;
+        }
+
+        function renderFullscreenChart(container, itemData) {
+            const hasData = Array.isArray(itemData.result) && itemData.result.length > 0
+                && Array.isArray(itemData.columns) && itemData.columns.length > 0;
+            
+            let chartRendered = false;
+            
+            if (hasData) {
+                try {
+                    renderG2PlotChart(container, itemData.result, itemData.columns, `fullscreen-${itemData.message_id}`);
+                    chartRendered = true;
+                } catch (e) {
+                    console.warn('Fullscreen G2Plot render failed:', e);
+                }
+            }
+            
+            if (!chartRendered && hasData) {
+                try {
+                    renderECharts(container, null, itemData.result, itemData.columns, `fullscreen-${itemData.message_id}`);
+                    chartRendered = true;
+                } catch (e) {
+                    console.warn('Fullscreen ECharts render failed:', e);
+                }
+            }
+            
+            if (!chartRendered && itemData.chart) {
+                try {
+                    renderPlotlyChart(container, itemData.chart, `fullscreen-${itemData.message_id}`);
+                    chartRendered = true;
+                } catch (e) {
+                    console.warn('Fullscreen Plotly render failed:', e);
+                }
+            }
+            
+            if (!chartRendered) {
+                container.innerHTML = '<div class="text-muted text-center p-5"><i class="bi bi-exclamation-circle fs-1 mb-3 d-block"></i>暂无图表数据</div>';
+            }
+        }
+
+        // AI 洞察报告相关
+        let currentReportContent = '';
+        let currentReportTitle = '';
+        let currentChartImages = []; // 存储图表截图
+
+        // 捕获单个图表的截图 - 优先使用图表库原生导出方法
+        async function captureChartScreenshot(chartContainer, title, messageId) {
+            try {
+                // 等待图表渲染完成
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+                // 尝试从 CHART_INSTANCES 获取图表实例
+                const chartKey = `pinned-${messageId}`;
+                const chartInfo = CHART_INSTANCES[chartKey];
+                
+                if (chartInfo) {
+                    console.log(`[Screenshot] 尝试使用原生方法导出图表: ${chartKey}, 类型: ${chartInfo.type}`);
+                    
+                    // ECharts 原生导出
+                    if (chartInfo.type === 'echarts' && chartInfo.chart) {
+                        try {
+                            const dataUrl = chartInfo.chart.getDataURL({
+                                type: 'png',
+                                pixelRatio: 2,
+                                backgroundColor: '#ffffff'
+                            });
+                            if (dataUrl && dataUrl.startsWith('data:image')) {
+                                console.log(`[Screenshot] ECharts 导出成功: ${title}`);
+                                return {
+                                    title: title,
+                                    dataUrl: dataUrl,
+                                    width: chartContainer.offsetWidth * 2,
+                                    height: chartContainer.offsetHeight * 2
+                                };
+                            }
+                        } catch (e) {
+                            console.warn('[Screenshot] ECharts 原生导出失败:', e);
+                        }
+                    }
+                    
+                    // G2Plot 原生导出
+                    if (chartInfo.type === 'g2plot' && chartInfo.chart) {
+                        try {
+                            // G2Plot 的 toDataURL 可能是异步的
+                            const dataUrl = await chartInfo.chart.toDataURL('image/png', { pixelRatio: 2 });
+                            if (dataUrl && dataUrl.startsWith('data:image')) {
+                                console.log(`[Screenshot] G2Plot 导出成功: ${title}`);
+                                return {
+                                    title: title,
+                                    dataUrl: dataUrl,
+                                    width: chartContainer.offsetWidth * 2,
+                                    height: chartContainer.offsetHeight * 2
+                                };
+                            }
+                        } catch (e) {
+                            console.warn('[Screenshot] G2Plot 原生导出失败:', e);
+                        }
+                    }
+                    
+                    // Plotly 原生导出
+                    if (chartInfo.type === 'plotly' && chartInfo.chart) {
+                        try {
+                            const dataUrl = await Plotly.toImage(chartInfo.chart, {
+                                format: 'png',
+                                width: chartContainer.offsetWidth * 2,
+                                height: chartContainer.offsetHeight * 2,
+                                scale: 2
+                            });
+                            if (dataUrl && dataUrl.startsWith('data:image')) {
+                                console.log(`[Screenshot] Plotly 导出成功: ${title}`);
+                                return {
+                                    title: title,
+                                    dataUrl: dataUrl,
+                                    width: chartContainer.offsetWidth * 2,
+                                    height: chartContainer.offsetHeight * 2
+                                };
+                            }
+                        } catch (e) {
+                            console.warn('[Screenshot] Plotly 原生导出失败:', e);
+                        }
+                    }
+                }
+                
+                // 回退方案：使用 html2canvas
+                console.log(`[Screenshot] 回退到 html2canvas: ${title}`);
+                const canvas = await html2canvas(chartContainer, {
+                    backgroundColor: '#ffffff',
+                    scale: 2, // 高清截图
+                    logging: false,
+                    useCORS: true,
+                    allowTaint: true,
+                    onclone: function(clonedDoc) {
+                        // 确保克隆的 canvas 元素也被正确处理
+                        const clonedContainer = clonedDoc.body.querySelector(`#${chartContainer.id}`);
+                        if (clonedContainer) {
+                            const canvasEls = chartContainer.querySelectorAll('canvas');
+                            const clonedCanvasEls = clonedContainer.querySelectorAll('canvas');
+                            canvasEls.forEach((origCanvas, idx) => {
+                                if (clonedCanvasEls[idx]) {
+                                    const ctx = clonedCanvasEls[idx].getContext('2d');
+                                    if (ctx) {
+                                        try {
+                                            ctx.drawImage(origCanvas, 0, 0);
+                                        } catch (e) {
+                                            console.warn('[Screenshot] Canvas 复制失败:', e);
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                });
+                
+                return {
+                    title: title,
+                    dataUrl: canvas.toDataURL('image/png'),
+                    width: canvas.width,
+                    height: canvas.height
+                };
+            } catch (e) {
+                console.warn('Failed to capture chart screenshot:', e);
+                return null;
+            }
+        }
+
+        async function generateInsightReport() {
+            const pinnedCards = document.querySelectorAll('.pinned-card[data-pinned-item]');
+            if (pinnedCards.length === 0) {
+                alert('看板中没有数据，请先添加图表到看板');
+                return;
+            }
+            
+            // 显示模态框
+            const modal = new bootstrap.Modal(document.getElementById('insightReportModal'));
+            modal.show();
+            
+            const reportContent = document.getElementById('reportContent');
+            const downloadMdBtn = document.getElementById('downloadMdBtn');
+            const downloadHtmlBtn = document.getElementById('downloadHtmlBtn');
+            
+            reportContent.innerHTML = `
+                <div class="text-center p-5 text-muted">
+                    <div class="spinner-border text-primary mb-3" role="status"></div>
+                    <p>正在截取图表截图...</p>
+                    <small id="captureProgress">准备中...</small>
+                </div>
+            `;
+            downloadMdBtn.disabled = true;
+            downloadHtmlBtn.disabled = true;
+            
+            // 收集看板数据和截取图表截图
+            const dashboardData = [];
+            currentChartImages = [];
+            const progressEl = document.getElementById('captureProgress');
+            
+            for (let i = 0; i < pinnedCards.length; i++) {
+                const card = pinnedCards[i];
+                try {
+                    const itemData = JSON.parse(card.getAttribute('data-pinned-item').replace(/&#39;/g, "'"));
+                    const question = itemData.question || `图表${i + 1}`;
+                    const messageId = itemData.message_id;
+                    
+                    // 更新进度
+                    if (progressEl) {
+                        progressEl.textContent = `正在截取图表 ${i + 1}/${pinnedCards.length}: ${question}`;
+                    }
+                    
+                    // 截取图表截图 - 传入 messageId 以便使用原生图表导出
+                    const chartContainer = card.querySelector('.pinned-chart');
+                    if (chartContainer) {
+                        const screenshot = await captureChartScreenshot(chartContainer, question, messageId);
+                        if (screenshot) {
+                            currentChartImages.push(screenshot);
+                            console.log(`[Report] 成功截取图表 ${i + 1}: ${question}`);
+                        } else {
+                            console.warn(`[Report] 截图失败: ${question}`);
+                        }
+                    }
+                    
+                    dashboardData.push({
+                        question: question,
+                        columns: itemData.columns,
+                        result: itemData.result ? itemData.result.slice(0, 50) : []
+                    });
+                } catch (e) {
+                    console.warn('Failed to process pinned item:', e);
+                }
+            }
+            
+            // 更新状态：正在生成报告
+            reportContent.innerHTML = `
+                <div class="text-center p-5 text-muted">
+                    <div class="spinner-border text-primary mb-3" role="status"></div>
+                    <p>正在生成AI洞察报告...</p>
+                    <small>已截取 ${currentChartImages.length} 张图表截图，AI正在分析数据</small>
+                </div>
+            `;
+            
+            try {
+                const res = await authFetch('/api/v0/analytics/insight-report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dashboard_data: dashboardData })
+                });
+                
+                const data = await res.json();
+                
+                if (data.success && data.report) {
+                    currentReportContent = data.report;
+                    currentReportTitle = data.title || 'AI洞察报告';
+                    
+                    // 渲染报告预览（包含图表截图内嵌到分析内容中）
+                    let previewHtml = renderReportWithCharts(data.report, currentChartImages);
+                    
+                    // 如果有未匹配的图表，在末尾显示
+                    const unmatchedCharts = currentChartImages.filter(img => !img._matched);
+                    if (unmatchedCharts.length > 0) {
+                        let chartsSection = '<h3 style="color: var(--vanna-teal); margin-top: 24px; margin-bottom: 12px; border-bottom: 1px solid var(--vanna-border); padding-bottom: 8px;">附录：其他图表</h3>';
+                        chartsSection += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px;">';
+                        unmatchedCharts.forEach((img, idx) => {
+                            chartsSection += `
+                                <div style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; background: #fff;">
+                                    <div style="font-weight: 600; margin-bottom: 8px; color: #023d60;">${img.title}</div>
+                                    <img src="${img.dataUrl}" style="width: 100%; border-radius: 4px;" alt="${img.title}">
+                                </div>
+                            `;
+                        });
+                        chartsSection += '</div>';
+                        previewHtml += chartsSection;
+                    }
+                    
+                    reportContent.innerHTML = `
+                        <div class="report-preview" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.8;">
+                            ${previewHtml}
+                        </div>
+                    `;
+                    
+                    downloadMdBtn.disabled = false;
+                    downloadHtmlBtn.disabled = false;
+                } else {
+                    reportContent.innerHTML = `
+                        <div class="text-center p-5 text-danger">
+                            <i class="bi bi-exclamation-circle fs-1 mb-3 d-block"></i>
+                            <p>报告生成失败</p>
+                            <small>${data.error || '请稍后重试'}</small>
+                        </div>
+                    `;
+                }
+            } catch (e) {
+                console.error('Generate report failed:', e);
+                reportContent.innerHTML = `
+                    <div class="text-center p-5 text-danger">
+                        <i class="bi bi-exclamation-circle fs-1 mb-3 d-block"></i>
+                        <p>网络错误，请稍后重试</p>
+                    </div>
+                `;
+            }
+        }
+
+        // 将图表截图嵌入到报告内容中对应的分析部分
+        function renderReportWithCharts(markdown, chartImages) {
+            if (!chartImages || chartImages.length === 0) {
+                return renderMarkdownToHtml(markdown);
+            }
+            
+            // 重置匹配标记
+            chartImages.forEach(img => img._matched = false);
+            
+            // 按四级标题分割报告（#### 代表具体分析小节）
+            const sections = markdown.split(/\n(?=#{3,4}\s)/);
+            let resultHtml = '';
+            
+            // 定义关键词到图表的映射
+            const keywordMatchers = [
+                { keywords: ['license使用', 'license类型', 'licensename', '不同license'], chartIndex: 0 },
+                { keywords: ['volte激活', 'volte成功', '激活成功率', 'success_count'], chartIndex: 1 },
+                { keywords: ['license消耗', 'license增长', '消耗趋势', 'daily_used', 'daily_growth'], chartIndex: 2 },
+                { keywords: ['业务访问', 'biz_type', '访问频率', 'total_access'], chartIndex: 3 },
+                { keywords: ['measure_type', 'vowifi', '访问量'], chartIndex: 4 },
+            ];
+            
+            for (let i = 0; i < sections.length; i++) {
+                const section = sections[i];
+                const sectionLower = section.toLowerCase();
+                
+                // 转换当前段落为HTML
+                let sectionHtml = renderMarkdownToHtml(section);
+                
+                // 1. 首先尝试通过"图表N"引用匹配
+                const chartRefs = [...section.matchAll(/\*{0,2}图表\s*(\d+)/gi)];
+                const chartNums = [...new Set(chartRefs.map(m => parseInt(m[1])))];
+                
+                let matchedInSection = false;
+                for (const chartNum of chartNums) {
+                    if (chartNum > 0 && chartNum <= chartImages.length) {
+                        const matchedChart = chartImages[chartNum - 1];
+                        if (!matchedChart._matched) {
+                            matchedChart._matched = true;
+                            matchedInSection = true;
+                            sectionHtml += createChartHtml(matchedChart, chartNum);
+                        }
+                    }
+                }
+                
+                // 2. 如果没有通过引用匹配，尝试通过关键词匹配
+                if (!matchedInSection && section.match(/^#{3,4}\s+\d+\.\d+/)) {
+                    for (const matcher of keywordMatchers) {
+                        if (matcher.chartIndex < chartImages.length) {
+                            const matchedChart = chartImages[matcher.chartIndex];
+                            if (!matchedChart._matched) {
+                                const hasMatch = matcher.keywords.some(kw => sectionLower.includes(kw.toLowerCase()));
+                                if (hasMatch) {
+                                    matchedChart._matched = true;
+                                    sectionHtml += createChartHtml(matchedChart, matcher.chartIndex + 1);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                resultHtml += sectionHtml;
+            }
+            
+            return resultHtml;
+        }
+        
+        // 创建图表HTML片段
+        function createChartHtml(chart, chartNum) {
+            return `
+                <div style="margin: 16px 0; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%); box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                    <div style="font-weight: 600; margin-bottom: 12px; color: #15a8a8; font-size: 14px;">
+                        <i class="bi bi-bar-chart-fill" style="margin-right: 6px;"></i>图表${chartNum}: ${chart.title}
+                    </div>
+                    <img src="${chart.dataUrl}" style="width: 100%; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1);" alt="${chart.title}">
+                </div>
+            `;
+        }
+        
+        // 用于导出HTML时的报告渲染（使用CSS类名而非内联样式）
+        function renderReportWithChartsForExport(markdown, chartImages) {
+            if (!chartImages || chartImages.length === 0) {
+                return renderMarkdownToHtmlForExport(markdown);
+            }
+            
+            // 重置匹配标记
+            chartImages.forEach(img => img._matched = false);
+            
+            // 按四级标题分割报告
+            const sections = markdown.split(/\n(?=#{3,4}\s)/);
+            let resultHtml = '';
+            
+            // 定义关键词到图表的映射
+            const keywordMatchers = [
+                { keywords: ['license使用', 'license类型', 'licensename', '不同license'], chartIndex: 0 },
+                { keywords: ['volte激活', 'volte成功', '激活成功率', 'success_count'], chartIndex: 1 },
+                { keywords: ['license消耗', 'license增长', '消耗趋势', 'daily_used', 'daily_growth'], chartIndex: 2 },
+                { keywords: ['业务访问', 'biz_type', '访问频率', 'total_access'], chartIndex: 3 },
+                { keywords: ['measure_type', 'vowifi', '访问量'], chartIndex: 4 },
+            ];
+            
+            for (let i = 0; i < sections.length; i++) {
+                const section = sections[i];
+                const sectionLower = section.toLowerCase();
+                
+                // 转换当前段落为HTML
+                let sectionHtml = renderMarkdownToHtmlForExport(section);
+                
+                // 1. 首先尝试通过"图表N"引用匹配
+                const chartRefs = [...section.matchAll(/\*{0,2}图表\s*(\d+)/gi)];
+                const chartNums = [...new Set(chartRefs.map(m => parseInt(m[1])))];
+                
+                let matchedInSection = false;
+                for (const chartNum of chartNums) {
+                    if (chartNum > 0 && chartNum <= chartImages.length) {
+                        const matchedChart = chartImages[chartNum - 1];
+                        if (!matchedChart._matched) {
+                            matchedChart._matched = true;
+                            matchedInSection = true;
+                            sectionHtml += `
+                                <div class="chart-container">
+                                    <div class="chart-title">图表${chartNum}: ${matchedChart.title}</div>
+                                    <img class="chart-img" src="${matchedChart.dataUrl}" alt="${matchedChart.title}">
+                                </div>
+                            `;
+                        }
+                    }
+                }
+                
+                // 2. 如果没有通过引用匹配，尝试通过关键词匹配
+                if (!matchedInSection && section.match(/^#{3,4}\s+\d+\.\d+/)) {
+                    for (const matcher of keywordMatchers) {
+                        if (matcher.chartIndex < chartImages.length) {
+                            const matchedChart = chartImages[matcher.chartIndex];
+                            if (!matchedChart._matched) {
+                                const hasMatch = matcher.keywords.some(kw => sectionLower.includes(kw.toLowerCase()));
+                                if (hasMatch) {
+                                    matchedChart._matched = true;
+                                    sectionHtml += `
+                                        <div class="chart-container">
+                                            <div class="chart-title">图表${matcher.chartIndex + 1}: ${matchedChart.title}</div>
+                                            <img class="chart-img" src="${matchedChart.dataUrl}" alt="${matchedChart.title}">
+                                        </div>
+                                    `;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                resultHtml += sectionHtml;
+            }
+            
+            return resultHtml;
+        }
+        
+        // 用于导出HTML时的Markdown转换
+        function renderMarkdownToHtmlForExport(markdown) {
+            let html = markdown
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+                .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+                .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/^- (.+)$/gm, '<li>$1</li>')
+                .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+                .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+                .replace(/`(.+?)`/g, '<code>$1</code>')
+                .replace(/^---$/gm, '<hr>')
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>');
+            
+            return '<p>' + html + '</p>';
+        }
+        
+        function renderMarkdownToHtml(markdown) {
+            // 简单的Markdown到HTML转换
+            let html = markdown
+                // 转义HTML特殊字符（但保留换行）
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                // 标题
+                .replace(/^### (.+)$/gm, '<h4 style="color: var(--vanna-navy); margin-top: 20px; margin-bottom: 10px;">$1</h4>')
+                .replace(/^## (.+)$/gm, '<h3 style="color: var(--vanna-teal); margin-top: 24px; margin-bottom: 12px; border-bottom: 1px solid var(--vanna-border); padding-bottom: 8px;">$1</h3>')
+                .replace(/^# (.+)$/gm, '<h2 style="color: var(--vanna-navy); margin-bottom: 16px;">$1</h2>')
+                // 粗体和斜体
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                // 列表
+                .replace(/^- (.+)$/gm, '<li style="margin-left: 20px; margin-bottom: 4px;">$1</li>')
+                .replace(/^(\d+)\. (.+)$/gm, '<li style="margin-left: 20px; margin-bottom: 4px;">$2</li>')
+                // 代码块
+                .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre style="background: #f8fafc; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 13px;"><code>$2</code></pre>')
+                // 行内代码
+                .replace(/`(.+?)`/g, '<code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 13px;">$1</code>')
+                // 分隔线
+                .replace(/^---$/gm, '<hr style="border: none; border-top: 1px solid var(--vanna-border); margin: 20px 0;">')
+                // 段落和换行
+                .replace(/\n\n/g, '</p><p style="margin-bottom: 12px;">')
+                .replace(/\n/g, '<br>');
+            
+            return '<p style="margin-bottom: 12px;">' + html + '</p>';
+        }
+
+        function downloadReport(format) {
+            if (!currentReportContent) {
+                alert('没有可下载的报告内容');
+                return;
+            }
+            
+            const timestamp = new Date().toISOString().slice(0, 10);
+            const filename = `${currentReportTitle}_${timestamp}`;
+            
+            if (format === 'md') {
+                // 下载Markdown（附带图表说明）
+                let mdContent = currentReportContent;
+                
+                // 如果有图表截图，在报告末尾添加图表引用说明
+                if (currentChartImages.length > 0) {
+                    mdContent += '\n\n---\n\n## 附录：看板图表\n\n';
+                    mdContent += '> 注意：Markdown格式的图表截图需要单独下载HTML版本查看，或使用"下载 HTML"按钮获取完整报告。\n\n';
+                    currentChartImages.forEach((img, idx) => {
+                        mdContent += `### 图表${idx + 1}: ${img.title}\n\n`;
+                        mdContent += `*图表截图请查看HTML版本报告*\n\n`;
+                    });
+                }
+                
+                const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
+                downloadBlob(blob, `${filename}.md`);
+            } else if (format === 'html') {
+                // 下载HTML（图表截图内嵌到分析内容中）
+                // 重置匹配标记用于导出
+                currentChartImages.forEach(img => img._matched = false);
+                
+                // 使用内嵌图表的渲染方式
+                const reportWithCharts = renderReportWithChartsForExport(currentReportContent, currentChartImages);
+                
+                // 检查是否有未匹配的图表
+                const unmatchedCharts = currentChartImages.filter(img => !img._matched);
+                let appendixHtml = '';
+                if (unmatchedCharts.length > 0) {
+                    appendixHtml = `
+        <h2>附录：其他图表</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px; margin-top: 20px;">
+        ${unmatchedCharts.map((img, idx) => `
+            <div style="border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; background: #fafafa;">
+                <h4 style="margin-top: 0; margin-bottom: 12px;">${img.title}</h4>
+                <img src="${img.dataUrl}" style="width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" alt="${img.title}">
+            </div>
+        `).join('')}
+        </div>`;
+                }
+                
+                const htmlContent = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${currentReportTitle}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.8;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            color: #333;
+            background: #fff;
+        }
+        h1 { color: #023d60; border-bottom: 2px solid #15a8a8; padding-bottom: 10px; }
+        h2 { color: #15a8a8; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; margin-top: 30px; }
+        h3 { color: #023d60; margin-top: 24px; }
+        h4 { color: #64748b; margin-top: 20px; }
+        ul, ol { padding-left: 24px; }
+        li { margin-bottom: 6px; }
+        code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 14px; }
+        pre { background: #f8fafc; padding: 16px; border-radius: 8px; overflow-x: auto; }
+        pre code { background: none; padding: 0; }
+        hr { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0; }
+        .chart-container {
+            margin: 20px 0;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 16px;
+            background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        .chart-title {
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #15a8a8;
+            font-size: 14px;
+        }
+        .chart-img {
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        }
+        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 14px; text-align: center; }
+        @media print {
+            body { max-width: 100%; padding: 20px; }
+            .page-break { page-break-before: always; }
+            .chart-container { break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    ${reportWithCharts}
+    ${appendixHtml}
+    <div class="footer">
+        <p>由 RedTea ChatBI 生成 | ${new Date().toLocaleString('zh-CN')}</p>
+    </div>
+</body>
+</html>`;
+                const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+                downloadBlob(blob, `${filename}.html`);
+            }
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
 
         function updatePinnedItems(items) {
@@ -1789,6 +2878,9 @@
         }
 
         async function createNewSession() {
+            // 切换到聊天视图
+            switchView('chat');
+            
             currentSessionId = 'session-' + Date.now();
             const chatBox = document.getElementById('chatBox');
             chatBox.innerHTML = `
@@ -2836,7 +3928,7 @@
                                         <i class="bi bi-plug"></i>
                                     </button>
                                     ${(ds.databases && ds.databases.length > 0) ? `
-                                    <button class="btn btn-sm btn-outline-success" onclick="generateCorpusFromDatasource('${ds.id}')" title="AI生成语料">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="alert('功能开发中，敬请期待！'); return false;" title="AI生成语料（开发中）">
                                         <i class="bi bi-magic"></i>
                                     </button>
                                     ` : ''}
