@@ -2038,6 +2038,9 @@ app = FastAPI(title="redtea chatBi MVP")
 # Mount static files (for serving images)
 app.mount("/img", StaticFiles(directory="img"), name="img")
 
+# Mount static files (for serving videos and other static assets)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # Import and Include Knowledge Base Router
 from knowledge_base_api import router as kb_router
 app.include_router(

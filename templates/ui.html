@@ -677,6 +677,127 @@
             display: none !important;
         }
 
+        /* 登录成功视频弹窗样式 */
+        .welcome-video-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .welcome-video-container {
+            position: relative;
+            width: 90%;
+            max-width: 900px;
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            animation: scaleIn 0.4s ease;
+        }
+
+        @keyframes scaleIn {
+            from { transform: scale(0.9); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        .welcome-video-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 16px 20px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .welcome-video-title {
+            color: white;
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .welcome-video-title i {
+            color: #ffd700;
+            font-size: 24px;
+        }
+
+        .welcome-video-close {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            font-size: 18px;
+        }
+
+        .welcome-video-close:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.1);
+        }
+
+        .welcome-video-player {
+            width: 100%;
+            display: block;
+            max-height: 80vh;
+        }
+
+        .welcome-video-footer {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 16px 20px;
+            background: linear-gradient(0deg, rgba(0,0,0,0.7) 0%, transparent 100%);
+            display: flex;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        .welcome-video-skip-btn {
+            background: linear-gradient(135deg, #15a8a8 0%, #0e8a8a 100%);
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .welcome-video-skip-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(21, 168, 168, 0.4);
+        }
+
         /* 数据源管理页面样式 */
         .ds-view {
             flex: 1;
@@ -1482,6 +1603,31 @@
         </div>
     </div>
 
+    <!-- 登录成功欢迎视频弹窗 -->
+    <div id="welcomeVideoModal" class="welcome-video-modal">
+        <div class="welcome-video-container">
+            <div class="welcome-video-header">
+                <div class="welcome-video-title">
+                    <i class="bi bi-stars"></i>
+                    <span>马年行大运，恭喜发财！</span>
+                </div>
+                <button class="welcome-video-close" onclick="closeWelcomeVideo()">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <video id="welcomeVideo" class="welcome-video-player" autoplay playsinline>
+                <source src="/static/welcome-video.mp4?v={{ range(1, 999999) | random }}" type="video/mp4">
+                您的浏览器不支持视频播放
+            </video>
+            <div class="welcome-video-footer">
+                <button class="welcome-video-skip-btn" onclick="closeWelcomeVideo()">
+                    <i class="bi bi-arrow-right-circle"></i>
+                    <span>跳过并进入系统</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         let APP_CONFIG = { show_sql: false };
@@ -1497,6 +1643,29 @@
         let managingKbId = null;  // 当前正在管理训练数据的知识库ID
         let managingKbName = null;  // 当前正在管理训练数据的知识库名称
         const TOKEN_KEY = 'auth_token';
+
+        // 欢迎视频相关函数
+        function showWelcomeVideo() {
+            const modal = document.getElementById('welcomeVideoModal');
+            const video = document.getElementById('welcomeVideo');
+            modal.style.display = 'flex';
+            video.currentTime = 0;
+            video.play().catch(e => console.warn('Video autoplay blocked:', e));
+            
+            // 视频播放结束后自动关闭并初始化应用
+            video.onended = function() {
+                closeWelcomeVideo();
+            };
+        }
+
+        function closeWelcomeVideo() {
+            const modal = document.getElementById('welcomeVideoModal');
+            const video = document.getElementById('welcomeVideo');
+            video.pause();
+            modal.style.display = 'none';
+            // 关闭视频后初始化应用
+            initializeApp();
+        }
 
         window.onload = async () => {
             try {
@@ -1586,7 +1755,8 @@
                 const data = await res.json();
                 setToken(data.access_token);
                 hideLoginPage();
-                await initializeApp();
+                // 登录成功后先播放欢迎视频
+                showWelcomeVideo();
             } catch (e) {
                 errEl.textContent = e.message || '登录失败，请检查用户名和密码';
                 errEl.style.display = 'block';
