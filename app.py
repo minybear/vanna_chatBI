@@ -37,9 +37,9 @@ load_dotenv()
 # 【调试】打印关键环境变量加载状态
 print("="*60)
 print("[ENV CHECK] 环境变量加载状态:")
-print(f"  - ZHIPU_API_KEY: {'已设置' if os.getenv('ZHIPU_API_KEY') else '❌ 未设置'}")
-print(f"  - DB_HOST: {'已设置' if os.getenv('DB_HOST') else '❌ 未设置'}")
-print(f"  - LARK_WEBHOOK_URL: {'已设置 ✅' if os.getenv('LARK_WEBHOOK_URL') else '❌ 未设置'}")
+print(f"  - ZHIPU_API_KEY: {'[OK]' if os.getenv('ZHIPU_API_KEY') else '[X] NOT SET'}")
+print(f"  - DB_HOST: {'[OK]' if os.getenv('DB_HOST') else '[X] NOT SET'}")
+print(f"  - LARK_WEBHOOK_URL: {'[OK]' if os.getenv('LARK_WEBHOOK_URL') else '[X] NOT SET'}")
 if os.getenv('LARK_WEBHOOK_URL'):
     webhook_url = os.getenv('LARK_WEBHOOK_URL')
     print(f"  - Webhook URL (前40字符): {webhook_url[:40]}...")
