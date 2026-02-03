@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <defs>
+    <style>
+      .box { fill:#ffffff; stroke:#1f2937; stroke-width:1.5; rx:10; ry:10; }
+      .group { fill:#f8fafc; stroke:#94a3b8; stroke-width:1.2; rx:12; ry:12; }
+      .title { font: 16px sans-serif; font-weight: 600; fill:#0f172a; }
+      .text { font: 13px sans-serif; fill:#0f172a; }
+      .muted { font: 12px sans-serif; fill:#475569; }
+      .arrow { stroke:#1f2937; stroke-width:1.4; fill:none; marker-end:url(#arrow); }
+      .dash { stroke-dasharray:6 4; }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#1f2937"/>
+    </marker>
+  </defs>
+
+  <text x="30" y="36" class="title">redtea chatBi MVP Architecture</text>
+
+  <rect x="40" y="90" width="190" height="80" class="box"/>
+  <text x="70" y="125" class="text">User / Browser</text>
+  <text x="70" y="148" class="muted">Q&amp;A and charts</text>
+
+  <rect x="40" y="220" width="190" height="90" class="box"/>
+  <text x="70" y="255" class="text">Web UI</text>
+  <text x="70" y="278" class="muted">/ui static page</text>
+
+  <rect x="280" y="140" width="260" height="210" class="group"/>
+  <text x="300" y="170" class="text">FastAPI Service</text>
+  <text x="300" y="194" class="muted">Auth / JWT / Tenant Isolation</text>
+  <text x="300" y="216" class="muted">Chat / SQL / KB API</text>
+  <text x="300" y="238" class="muted">Feedback &amp; Audit Entry</text>
+
+  <rect x="600" y="90" width="320" height="260" class="group"/>
+  <text x="620" y="120" class="text">ChatBI Core</text>
+  <rect x="620" y="140" width="280" height="70" class="box"/>
+  <text x="640" y="170" class="text">Vanna Engine</text>
+  <text x="640" y="192" class="muted">NL -&gt; SQL / Charting</text>
+
+  <rect x="620" y="225" width="280" height="100" class="box"/>
+  <text x="640" y="255" class="text">RAG Retrieval &amp; Context</text>
+  <text x="640" y="277" class="muted">Knowledge / History</text>
+  <text x="640" y="299" class="muted">Threshold filtering</text>
+
+  <rect x="970" y="90" width="200" height="90" class="box"/>
+  <text x="990" y="120" class="text">Zhipu LLM</text>
+  <text x="990" y="142" class="muted">GLM-4.5</text>
+
+  <rect x="970" y="200" width="200" height="90" class="box"/>
+  <text x="990" y="230" class="text">Embedding</text>
+  <text x="990" y="252" class="muted">Zhipu Embedding</text>
+
+  <rect x="600" y="400" width="260" height="90" class="box"/>
+  <text x="620" y="430" class="text">ChromaDB</text>
+  <text x="620" y="452" class="muted">Vectors / Memory / KB</text>
+
+  <rect x="900" y="400" width="240" height="90" class="box"/>
+  <text x="920" y="430" class="text">MariaDB</text>
+  <text x="920" y="452" class="muted">Business data / SQL exec</text>
+
+  <rect x="280" y="380" width="260" height="90" class="box"/>
+  <text x="300" y="410" class="text">Lark Webhook</text>
+  <text x="300" y="432" class="muted">Downvote alerts</text>
+
+  <line x1="135" y1="170" x2="135" y2="220" class="arrow"/>
+  <line x1="230" y1="265" x2="280" y2="245" class="arrow"/>
+  <line x1="540" y1="245" x2="600" y2="215" class="arrow"/>
+  <line x1="760" y1="210" x2="970" y2="135" class="arrow"/>
+  <line x1="760" y1="260" x2="970" y2="245" class="arrow"/>
+  <line x1="740" y1="325" x2="730" y2="400" class="arrow"/>
+  <line x1="760" y1="210" x2="900" y2="400" class="arrow"/>
+  <line x1="410" y1="350" x2="410" y2="380" class="arrow"/>
+  <line x1="540" y1="245" x2="540" y2="245" class="arrow"/>
+
+  <line x1="540" y1="245" x2="600" y2="245" class="arrow dash"/>
+  <line x1="540" y1="245" x2="600" y2="260" class="arrow dash"/>
+
+  <text x="40" y="680" class="muted">Note: FastAPI handles auth/tenant isolation; Vanna does NL-&gt;SQL and charts; RAG uses ChromaDB + Zhipu Embedding; SQL runs on MariaDB.</text>
+</svg>
