@@ -1286,6 +1286,115 @@
         </div>
     </div>
 
+    <!-- 表选择弹窗 -->
+    <div class="modal fade" id="tableSelectModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold">
+                        <i class="bi bi-table me-2"></i>选择要分析的表
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <span class="text-muted">数据源：</span>
+                        <span id="tableSelectDatasourceName" class="fw-bold"></span>
+                    </div>
+                    
+                    <!-- 模式切换 -->
+                    <div class="d-flex align-items-center mb-3 p-2 bg-light rounded">
+                        <span class="me-2">选择模式：</span>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <input type="radio" class="btn-check" name="selectMode" id="modeInclude" value="include" checked>
+                            <label class="btn btn-outline-primary" for="modeInclude">
+                                <i class="bi bi-check-circle me-1"></i>选择要包含的表
+                            </label>
+                            <input type="radio" class="btn-check" name="selectMode" id="modeExclude" value="exclude">
+                            <label class="btn btn-outline-danger" for="modeExclude">
+                                <i class="bi bi-x-circle me-1"></i>选择要排除的表
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- 快捷过滤 -->
+                    <div class="mb-3">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control" id="tableFilterInput" placeholder="搜索表名..." oninput="filterTableList()">
+                            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                快捷排除
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item" href="#" onclick="quickExcludeByPrefix('bak_'); return false;">排除 bak_ 开头</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="quickExcludeByPrefix('tmp_'); return false;">排除 tmp_ 开头</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="quickExcludeByPrefix('test_'); return false;">排除 test_ 开头</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="quickExcludeBySuffix('_bak'); return false;">排除 _bak 结尾</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="quickExcludeBySuffix('_copy'); return false;">排除 _copy 结尾</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="quickExcludeBySuffix('_old'); return false;">排除 _old 结尾</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="#" onclick="selectAllTables(); return false;">全选</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="deselectAllTables(); return false;">全不选</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <!-- 统计信息 -->
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-muted small">
+                            共 <span id="totalTableCount">0</span> 个表，
+                            已选 <span id="selectedTableCount" class="text-primary fw-bold">0</span> 个
+                        </span>
+                        <span id="tableModeHint" class="badge bg-primary">将分析选中的表</span>
+                    </div>
+                    
+                    <!-- 表列表 -->
+                    <div id="tableSelectContent" style="max-height: 350px; overflow-y: auto;">
+                        <!-- 动态内容 -->
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="confirmTableSelection()">
+                        <i class="bi bi-arrow-right me-1"></i>下一步：分析 DDL 质量
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DDL质量分析弹窗 -->
+    <div class="modal fade" id="ddlQualityModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg" style="border-radius: 20px;">
+                <div class="modal-header border-bottom-0 pb-0">
+                    <h5 class="modal-title fw-bold">
+                        <i class="bi bi-clipboard-data me-2"></i>DDL 质量分析
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <span class="text-muted">数据源：</span>
+                        <span id="ddlQualityDatasourceName" class="fw-bold"></span>
+                    </div>
+                    <div id="ddlQualityContent">
+                        <!-- 动态内容 -->
+                    </div>
+                </div>
+                <div class="modal-footer border-top-0">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-outline-primary" onclick="skipQualityAndGenerate()">
+                        <i class="bi bi-skip-forward me-1"></i>跳过，直接生成
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="saveFieldsAndGenerate()">
+                        <i class="bi bi-check2-circle me-1"></i>保存并生成语料
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- AI语料生成器弹窗 -->
     <div class="modal fade" id="corpusEditorModal" tabindex="-1">
         <div class="modal-dialog modal-xl modal-dialog-centered">
@@ -4098,7 +4207,7 @@
                                         <i class="bi bi-plug"></i>
                                     </button>
                                     ${(ds.databases && ds.databases.length > 0) ? `
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="alert('功能开发中，敬请期待！'); return false;" title="AI生成语料（开发中）">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="generateCorpusFromDatasource('${ds.id}')" title="AI生成语料">
                                         <i class="bi bi-magic"></i>
                                     </button>
                                     ` : ''}
@@ -4377,8 +4486,16 @@
         // ==================== AI语料生成 ====================
         
         let CORPUS_DATA = [];  // 当前生成的语料数据
+        let DDL_QUALITY_REPORT = null;  // DDL 质量分析报告
+        let CURRENT_DATASOURCE_ID = null;  // 当前数据源ID
+        let CURRENT_DATASOURCE = null;  // 当前数据源对象
+        let ALL_TABLES = [];  // 所有表列表
+        let SELECTED_TABLES = {};  // 选中的表 {database: [table1, table2, ...]}
+        let SELECT_MODE = 'include';  // 选择模式: include 或 exclude
         let corpusEditorModal = null;
         let corpusItemModal = null;
+        let ddlQualityModal = null;
+        let tableSelectModal = null;
         let currentFilterType = 'all';
         
         async function generateCorpusFromDatasource(datasourceId) {
@@ -4392,6 +4509,619 @@
                 alert('该数据源未选择数据库，请先在数据源管理中配置数据库');
                 return;
             }
+            
+            CURRENT_DATASOURCE_ID = datasourceId;
+            CURRENT_DATASOURCE = ds;
+            
+            // 先显示表选择界面
+            await showTableSelectModal(datasourceId, ds);
+        }
+        
+        // 显示表选择弹窗
+        async function showTableSelectModal(datasourceId, ds) {
+            if (!tableSelectModal) {
+                tableSelectModal = new bootstrap.Modal(document.getElementById('tableSelectModal'));
+            }
+            
+            document.getElementById('tableSelectDatasourceName').textContent = ds.name;
+            document.getElementById('tableSelectContent').innerHTML = `
+                <div class="text-center p-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <div class="mt-3">正在获取表列表...</div>
+                </div>
+            `;
+            
+            // 重置选择状态
+            ALL_TABLES = [];
+            SELECTED_TABLES = {};
+            SELECT_MODE = 'include';
+            document.getElementById('modeInclude').checked = true;
+            document.getElementById('tableFilterInput').value = '';
+            
+            tableSelectModal.show();
+            
+            try {
+                // 获取数据源的表列表
+                const res = await authFetch(`/api/v0/datasources/${datasourceId}/tables`);
+                if (!res.ok) {
+                    throw new Error('获取表列表失败');
+                }
+                
+                const data = await res.json();
+                
+                // 转换格式: {db1: [{name, type}, ...], db2: [...]} -> [{database, table}, ...]
+                ALL_TABLES = [];
+                const tablesByDb = data.tables_by_database || {};
+                for (const [db, tables] of Object.entries(tablesByDb)) {
+                    for (const tableInfo of tables) {
+                        // tableInfo 可能是对象 {name, type, ...} 或字符串
+                        const tableName = typeof tableInfo === 'object' ? tableInfo.name : tableInfo;
+                        ALL_TABLES.push({ database: db, table: tableName });
+                    }
+                }
+                
+                // 默认全选
+                SELECTED_TABLES = {};
+                ALL_TABLES.forEach(t => {
+                    if (!SELECTED_TABLES[t.database]) {
+                        SELECTED_TABLES[t.database] = [];
+                    }
+                    SELECTED_TABLES[t.database].push(t.table);
+                });
+                
+                renderTableSelectList();
+                
+            } catch(e) {
+                console.error('获取表列表失败:', e);
+                document.getElementById('tableSelectContent').innerHTML = `
+                    <div class="text-center text-danger p-5">
+                        <i class="bi bi-x-circle fs-1"></i>
+                        <div class="mt-3">获取表列表失败: ${e.message}</div>
+                    </div>
+                `;
+            }
+        }
+        
+        // 渲染表选择列表
+        function renderTableSelectList() {
+            const filter = document.getElementById('tableFilterInput').value.toLowerCase();
+            const filteredTables = ALL_TABLES.filter(t => 
+                t.table.toLowerCase().includes(filter) || 
+                t.database.toLowerCase().includes(filter)
+            );
+            
+            // 按数据库分组
+            const grouped = {};
+            filteredTables.forEach(t => {
+                if (!grouped[t.database]) {
+                    grouped[t.database] = [];
+                }
+                grouped[t.database].push(t.table);
+            });
+            
+            let html = '';
+            for (const [db, tables] of Object.entries(grouped)) {
+                const dbSelected = SELECTED_TABLES[db] || [];
+                const allSelected = tables.every(t => dbSelected.includes(t));
+                const someSelected = tables.some(t => dbSelected.includes(t));
+                
+                html += `
+                    <div class="mb-3">
+                        <div class="d-flex align-items-center mb-2 p-2 bg-light rounded">
+                            <input type="checkbox" class="form-check-input me-2" 
+                                id="db_${db}" 
+                                ${allSelected ? 'checked' : ''} 
+                                ${someSelected && !allSelected ? 'indeterminate' : ''}
+                                onchange="toggleDatabase('${db}', this.checked)">
+                            <label class="form-check-label fw-bold" for="db_${db}">
+                                <i class="bi bi-database me-1"></i>${db}
+                            </label>
+                            <span class="badge bg-secondary ms-2">${tables.length} 表</span>
+                        </div>
+                        <div class="row row-cols-2 row-cols-md-3 g-2 ps-4">
+                            ${tables.map(table => {
+                                const isSelected = dbSelected.includes(table);
+                                const isBak = /^(bak_|tmp_|test_)|(_bak|_copy|_old|_backup)$/i.test(table);
+                                return `
+                                    <div class="col">
+                                        <div class="form-check">
+                                            <input type="checkbox" class="form-check-input table-checkbox" 
+                                                data-db="${db}" data-table="${table}"
+                                                id="tbl_${db}_${table}" 
+                                                ${isSelected ? 'checked' : ''}
+                                                onchange="toggleTable('${db}', '${table}', this.checked)">
+                                            <label class="form-check-label small ${isBak ? 'text-muted' : ''}" for="tbl_${db}_${table}">
+                                                ${table} ${isBak ? '<i class="bi bi-exclamation-triangle text-warning" title="可能是备份表"></i>' : ''}
+                                            </label>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            document.getElementById('tableSelectContent').innerHTML = html || '<div class="text-center text-muted p-3">没有找到匹配的表</div>';
+            updateTableSelectStats();
+            
+            // 设置 indeterminate 状态
+            for (const [db, tables] of Object.entries(grouped)) {
+                const dbSelected = SELECTED_TABLES[db] || [];
+                const allSelected = tables.every(t => dbSelected.includes(t));
+                const someSelected = tables.some(t => dbSelected.includes(t));
+                const checkbox = document.getElementById(`db_${db}`);
+                if (checkbox) {
+                    checkbox.indeterminate = someSelected && !allSelected;
+                }
+            }
+        }
+        
+        // 切换数据库选中状态
+        function toggleDatabase(db, checked) {
+            const tables = ALL_TABLES.filter(t => t.database === db).map(t => t.table);
+            if (checked) {
+                SELECTED_TABLES[db] = [...tables];
+            } else {
+                SELECTED_TABLES[db] = [];
+            }
+            renderTableSelectList();
+        }
+        
+        // 切换表选中状态
+        function toggleTable(db, table, checked) {
+            if (!SELECTED_TABLES[db]) {
+                SELECTED_TABLES[db] = [];
+            }
+            if (checked) {
+                if (!SELECTED_TABLES[db].includes(table)) {
+                    SELECTED_TABLES[db].push(table);
+                }
+            } else {
+                SELECTED_TABLES[db] = SELECTED_TABLES[db].filter(t => t !== table);
+            }
+            renderTableSelectList();
+        }
+        
+        // 过滤表列表
+        function filterTableList() {
+            renderTableSelectList();
+        }
+        
+        // 快捷排除前缀
+        function quickExcludeByPrefix(prefix) {
+            console.log('[DEBUG] quickExcludeByPrefix:', prefix, '当前模式:', SELECT_MODE);
+            let count = 0;
+            ALL_TABLES.forEach(t => {
+                if (t.table.toLowerCase().startsWith(prefix.toLowerCase())) {
+                    if (!SELECTED_TABLES[t.database]) {
+                        SELECTED_TABLES[t.database] = [];
+                    }
+                    const isSelected = SELECTED_TABLES[t.database].includes(t.table);
+                    
+                    if (SELECT_MODE === 'include') {
+                        // 包含模式：取消勾选匹配的表（从选中列表中移除）
+                        if (isSelected) {
+                            SELECTED_TABLES[t.database] = SELECTED_TABLES[t.database].filter(x => x !== t.table);
+                            count++;
+                        }
+                    } else {
+                        // 排除模式：勾选匹配的表（添加到排除列表）
+                        if (!isSelected) {
+                            SELECTED_TABLES[t.database].push(t.table);
+                            count++;
+                        }
+                    }
+                }
+            });
+            console.log('[DEBUG] 操作了', count, '个表');
+            renderTableSelectList();
+        }
+        
+        // 快捷排除后缀
+        function quickExcludeBySuffix(suffix) {
+            console.log('[DEBUG] quickExcludeBySuffix:', suffix, '当前模式:', SELECT_MODE);
+            let count = 0;
+            ALL_TABLES.forEach(t => {
+                if (t.table.toLowerCase().endsWith(suffix.toLowerCase())) {
+                    if (!SELECTED_TABLES[t.database]) {
+                        SELECTED_TABLES[t.database] = [];
+                    }
+                    const isSelected = SELECTED_TABLES[t.database].includes(t.table);
+                    
+                    if (SELECT_MODE === 'include') {
+                        // 包含模式：取消勾选匹配的表（从选中列表中移除）
+                        if (isSelected) {
+                            SELECTED_TABLES[t.database] = SELECTED_TABLES[t.database].filter(x => x !== t.table);
+                            count++;
+                        }
+                    } else {
+                        // 排除模式：勾选匹配的表（添加到排除列表）
+                        if (!isSelected) {
+                            SELECTED_TABLES[t.database].push(t.table);
+                            count++;
+                        }
+                    }
+                }
+            });
+            console.log('[DEBUG] 操作了', count, '个表');
+            renderTableSelectList();
+        }
+        
+        // 全选
+        function selectAllTables() {
+            SELECTED_TABLES = {};
+            ALL_TABLES.forEach(t => {
+                if (!SELECTED_TABLES[t.database]) {
+                    SELECTED_TABLES[t.database] = [];
+                }
+                SELECTED_TABLES[t.database].push(t.table);
+            });
+            renderTableSelectList();
+        }
+        
+        // 全不选
+        function deselectAllTables() {
+            SELECTED_TABLES = {};
+            renderTableSelectList();
+        }
+        
+        // 更新统计信息
+        function updateTableSelectStats() {
+            const total = ALL_TABLES.length;
+            let selected = 0;
+            for (const tables of Object.values(SELECTED_TABLES)) {
+                selected += tables.length;
+            }
+            
+            document.getElementById('totalTableCount').textContent = total;
+            document.getElementById('selectedTableCount').textContent = selected;
+            
+            const mode = document.querySelector('input[name="selectMode"]:checked').value;
+            const hint = document.getElementById('tableModeHint');
+            if (mode === 'include') {
+                hint.className = 'badge bg-primary';
+                hint.textContent = `将分析选中的 ${selected} 个表`;
+            } else {
+                hint.className = 'badge bg-danger';
+                hint.textContent = `将排除选中的 ${selected} 个表，分析其余 ${total - selected} 个表`;
+            }
+        }
+        
+        // 监听模式切换
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('input[name="selectMode"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    SELECT_MODE = this.value;
+                    console.log('[DEBUG] 模式切换为:', SELECT_MODE);
+                    updateTableSelectStats();
+                });
+            });
+        });
+        
+        // 确认表选择，进入 DDL 质量分析
+        async function confirmTableSelection() {
+            const mode = document.querySelector('input[name="selectMode"]:checked').value;
+            let tablesToAnalyze = {};
+            
+            if (mode === 'include') {
+                tablesToAnalyze = {...SELECTED_TABLES};
+            } else {
+                // 排除模式：选择所有未被选中的表
+                ALL_TABLES.forEach(t => {
+                    const isExcluded = (SELECTED_TABLES[t.database] || []).includes(t.table);
+                    if (!isExcluded) {
+                        if (!tablesToAnalyze[t.database]) {
+                            tablesToAnalyze[t.database] = [];
+                        }
+                        tablesToAnalyze[t.database].push(t.table);
+                    }
+                });
+            }
+            
+            // 检查是否选择了表
+            const totalSelected = Object.values(tablesToAnalyze).reduce((sum, arr) => sum + arr.length, 0);
+            if (totalSelected === 0) {
+                alert('请至少选择一个表');
+                return;
+            }
+            
+            tableSelectModal.hide();
+            
+            // 进入 DDL 质量分析
+            await analyzeDDLQuality(CURRENT_DATASOURCE_ID, CURRENT_DATASOURCE, tablesToAnalyze);
+        }
+        
+        // DDL 质量分析
+        async function analyzeDDLQuality(datasourceId, ds, tables = null) {
+            if (!ddlQualityModal) {
+                ddlQualityModal = new bootstrap.Modal(document.getElementById('ddlQualityModal'));
+            }
+            
+            // 显示分析中状态
+            document.getElementById('ddlQualityDatasourceName').textContent = ds.name;
+            document.getElementById('ddlQualityContent').innerHTML = `
+                <div class="text-center p-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <div class="mt-3">正在分析 DDL 质量...</div>
+                    <div class="small text-muted mt-2">分析字段注释完整度，预计需要几秒钟</div>
+                </div>
+            `;
+            
+            ddlQualityModal.show();
+            
+            // 保存选中的表，供后续生成语料使用
+            window.TABLES_TO_ANALYZE = tables;
+            
+            try {
+                const res = await authFetch(`/api/v0/datasources/${datasourceId}/analyze_ddl_quality`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ tables: tables })
+                });
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || '分析DDL质量失败');
+                }
+                
+                DDL_QUALITY_REPORT = await res.json();
+                renderDDLQualityReport();
+                
+            } catch(e) {
+                console.error('DDL质量分析失败:', e);
+                document.getElementById('ddlQualityContent').innerHTML = `
+                    <div class="text-center text-danger p-5">
+                        <i class="bi bi-x-circle fs-1"></i>
+                        <div class="mt-3">分析失败: ${e.message}</div>
+                        <button class="btn btn-outline-secondary mt-3" onclick="ddlQualityModal.hide()">关闭</button>
+                    </div>
+                `;
+            }
+        }
+        
+        // 存储用户编辑的字段描述
+        let EDITED_FIELDS = {};
+        
+        // 渲染 DDL 质量报告
+        function renderDDLQualityReport() {
+            const report = DDL_QUALITY_REPORT;
+            if (!report) return;
+            
+            // 重置编辑状态
+            EDITED_FIELDS = {};
+            
+            document.getElementById('ddlQualityContent').innerHTML = `
+                <div class="ddl-quality-report">
+                    <!-- 统计概览 -->
+                    <div class="row mb-4">
+                        <div class="col-3 text-center">
+                            <div class="fs-3 fw-bold text-primary">${report.total_tables}</div>
+                            <div class="small text-muted">总表数</div>
+                        </div>
+                        <div class="col-3 text-center">
+                            <div class="fs-3 fw-bold">${report.total_fields}</div>
+                            <div class="small text-muted">总字段</div>
+                        </div>
+                        <div class="col-2 text-center">
+                            <div class="fs-3 fw-bold text-success">${report.high_quality_fields}</div>
+                            <div class="small text-muted">高质量</div>
+                        </div>
+                        <div class="col-2 text-center">
+                            <div class="fs-3 fw-bold text-warning">${report.needs_confirm_fields}</div>
+                            <div class="small text-muted">需确认</div>
+                        </div>
+                        <div class="col-2 text-center">
+                            <div class="fs-3 fw-bold text-danger">${report.unknown_fields}</div>
+                            <div class="small text-muted">需补充</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 质量进度条 -->
+                    <div class="progress mb-3" style="height: 8px;">
+                        <div class="progress-bar bg-success" style="width: ${report.high_quality_fields / report.total_fields * 100}%"></div>
+                        <div class="progress-bar bg-warning" style="width: ${report.needs_confirm_fields / report.total_fields * 100}%"></div>
+                        <div class="progress-bar bg-danger" style="width: ${report.unknown_fields / report.total_fields * 100}%"></div>
+                    </div>
+                    
+                    <!-- 提示信息 -->
+                    ${report.needs_confirm_fields > 0 || report.unknown_fields > 0 ? `
+                        <div class="alert alert-info mb-3">
+                            <i class="bi bi-pencil-square me-2"></i>
+                            <strong>可编辑：</strong>点击下方字段的描述可以直接修改，修改后点击"保存并生成"。
+                            <br><span class="small text-muted">提示：AI 推断的描述可能不准确，请检查确认；空白字段建议填写中文描述。</span>
+                        </div>
+                    ` : `
+                        <div class="alert alert-success mb-3">
+                            <i class="bi bi-check-circle me-2"></i>
+                            所有字段都有清晰的描述，可以直接生成高质量语料！
+                        </div>
+                    `}
+                    
+                    <!-- 需确认字段列表（可折叠、可编辑） -->
+                    ${report.needs_confirm_fields > 0 ? `
+                        <div class="accordion mb-3" id="needsConfirmAccordion">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#needsConfirmList">
+                                        <i class="bi bi-question-circle text-warning me-2"></i>
+                                        需确认的字段 (${report.needs_confirm_fields})
+                                        <span class="badge bg-warning text-dark ms-2">可编辑</span>
+                                    </button>
+                                </h2>
+                                <div id="needsConfirmList" class="accordion-collapse collapse show" data-bs-parent="#needsConfirmAccordion">
+                                    <div class="accordion-body p-2" style="max-height: 250px; overflow-y: auto;">
+                                        <div class="d-flex justify-content-end mb-2">
+                                            <button class="btn btn-sm btn-outline-success" onclick="confirmAllAiInferred()">
+                                                <i class="bi bi-check-all me-1"></i>全部确认AI推断
+                                            </button>
+                                        </div>
+                                        <table class="table table-sm table-hover mb-0">
+                                            <thead class="table-light sticky-top"><tr><th style="width:25%">表名</th><th style="width:20%">字段</th><th style="width:55%">描述 <small class="text-muted">(可编辑)</small></th></tr></thead>
+                                            <tbody>
+                                                ${report.needs_confirm_list.map((f, idx) => `
+                                                    <tr>
+                                                        <td class="small text-muted">${f.table}</td>
+                                                        <td><code class="text-primary">${f.column}</code></td>
+                                                        <td>
+                                                            <input type="text" class="form-control form-control-sm field-desc-input" 
+                                                                data-db="${f.database}" data-table="${f.table}" data-column="${f.column}" data-datatype="${f.data_type || 'varchar'}"
+                                                                value="${f.ddl_comment || f.ai_inferred || ''}" 
+                                                                placeholder="输入字段描述..."
+                                                                onchange="onFieldDescChange(this)">
+                                                        </td>
+                                                    </tr>
+                                                `).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    <!-- 未知字段列表（可折叠、可编辑） -->
+                    ${report.unknown_fields > 0 ? `
+                        <div class="accordion mb-3" id="unknownAccordion">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button ${report.needs_confirm_fields > 0 ? 'collapsed' : ''}" type="button" data-bs-toggle="collapse" data-bs-target="#unknownList">
+                                        <i class="bi bi-x-circle text-danger me-2"></i>
+                                        需补充的字段 (${report.unknown_fields})
+                                        <span class="badge bg-danger ms-2">需填写</span>
+                                    </button>
+                                </h2>
+                                <div id="unknownList" class="accordion-collapse collapse ${report.needs_confirm_fields === 0 ? 'show' : ''}" data-bs-parent="#unknownAccordion">
+                                    <div class="accordion-body p-2" style="max-height: 250px; overflow-y: auto;">
+                                        <table class="table table-sm table-hover mb-0">
+                                            <thead class="table-light sticky-top"><tr><th style="width:25%">表名</th><th style="width:20%">字段</th><th style="width:55%">描述 <small class="text-danger">(请填写)</small></th></tr></thead>
+                                            <tbody>
+                                                ${report.unknown_list.map((f, idx) => `
+                                                    <tr>
+                                                        <td class="small text-muted">${f.table}</td>
+                                                        <td><code class="text-danger">${f.column}</code></td>
+                                                        <td>
+                                                            <input type="text" class="form-control form-control-sm field-desc-input ${f.ddl_comment || f.ai_inferred ? '' : 'border-danger'}" 
+                                                                data-db="${f.database}" data-table="${f.table}" data-column="${f.column}" data-datatype="${f.data_type || 'varchar'}"
+                                                                value="${f.ddl_comment || f.ai_inferred || ''}" 
+                                                                placeholder="请输入字段描述..."
+                                                                onchange="onFieldDescChange(this)">
+                                                        </td>
+                                                    </tr>
+                                                `).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    <!-- 编辑统计 -->
+                    <div id="editStats" class="text-end small text-muted mb-2" style="display:none;">
+                        已编辑 <span id="editedCount">0</span> 个字段
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 字段描述变更处理
+        function onFieldDescChange(input) {
+            const db = input.dataset.db;
+            const table = input.dataset.table;
+            const column = input.dataset.column;
+            const dataType = input.dataset.datatype || 'varchar';
+            const value = input.value.trim();
+            
+            const key = `${db}.${table}.${column}`;
+            if (value) {
+                EDITED_FIELDS[key] = { 
+                    database: db, 
+                    table: table, 
+                    column: column, 
+                    data_type: dataType,
+                    human_defined: value 
+                };
+                input.classList.remove('border-danger');
+                input.classList.add('border-success');
+            } else {
+                delete EDITED_FIELDS[key];
+                input.classList.remove('border-success');
+            }
+            
+            // 更新统计
+            const count = Object.keys(EDITED_FIELDS).length;
+            const statsEl = document.getElementById('editStats');
+            if (count > 0) {
+                statsEl.style.display = 'block';
+                document.getElementById('editedCount').textContent = count;
+            } else {
+                statsEl.style.display = 'none';
+            }
+        }
+        
+        // 全部确认 AI 推断
+        function confirmAllAiInferred() {
+            const inputs = document.querySelectorAll('#needsConfirmList .field-desc-input');
+            inputs.forEach(input => {
+                if (input.value.trim()) {
+                    onFieldDescChange(input);
+                    input.classList.add('border-success');
+                }
+            });
+            alert(`已确认 ${inputs.length} 个 AI 推断的字段描述`);
+        }
+        
+        // 跳过质量检查，直接生成语料
+        async function skipQualityAndGenerate() {
+            ddlQualityModal.hide();
+            await doGenerateCorpus(CURRENT_DATASOURCE_ID);
+        }
+        
+        // 保存字段描述并生成语料
+        async function saveFieldsAndGenerate() {
+            const editedList = Object.values(EDITED_FIELDS);
+            
+            if (editedList.length > 0) {
+                // 显示保存中状态
+                const saveBtn = document.querySelector('.modal-footer .btn-primary');
+                const originalText = saveBtn.innerHTML;
+                saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>保存中...';
+                saveBtn.disabled = true;
+                
+                try {
+                    // 调用 API 保存字段描述
+                    const res = await authFetch(`/api/v0/datasources/${CURRENT_DATASOURCE_ID}/field_metadata/batch_save`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ fields: editedList })
+                    });
+                    
+                    if (!res.ok) {
+                        const err = await res.json();
+                        throw new Error(err.detail || '保存字段描述失败');
+                    }
+                    
+                    console.log(`已保存 ${editedList.length} 个字段描述`);
+                    
+                } catch(e) {
+                    console.error('保存字段描述失败:', e);
+                    alert('保存失败: ' + e.message);
+                    saveBtn.innerHTML = originalText;
+                    saveBtn.disabled = false;
+                    return;
+                }
+            }
+            
+            // 关闭弹窗并生成语料
+            ddlQualityModal.hide();
+            await doGenerateCorpus(CURRENT_DATASOURCE_ID);
+        }
+        
+        // 执行实际的语料生成
+        async function doGenerateCorpus(datasourceId) {
+            const ds = DS_DATA.find(d => d.id === datasourceId);
+            if (!ds) return;
             
             if (!corpusEditorModal) {
                 corpusEditorModal = new bootstrap.Modal(document.getElementById('corpusEditorModal'));

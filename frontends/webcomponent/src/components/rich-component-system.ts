@@ -1748,6 +1748,7 @@ export class ComponentRegistry {
       'card': 'rich-card',
       'task_list': 'rich-task-list',
       'progress_bar': 'rich-progress-bar',
+      'ddl_quality_card': 'ddl-quality-card',
       // We'll add more mappings as we convert other components
     };
     return mapping[type] || null;

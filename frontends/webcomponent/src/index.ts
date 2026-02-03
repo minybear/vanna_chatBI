@@ -21,6 +21,7 @@ export { VannaMessage } from './components/vanna-message';
 export { VannaStatusBar } from './components/vanna-status-bar';
 export { VannaProgressTracker } from './components/vanna-progress-tracker';
 export { PlotlyChart } from './components/plotly-chart';
+export { DDLQualityCard } from './components/ddl-quality-card';
 
 // Rich component system
 export {

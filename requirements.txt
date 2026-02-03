@@ -5,3 +5,6 @@ pymysql
 python-dotenv
 httpx
 zhipuai
+PyJWT>=2.8.0
+python-multipart
+cryptography
