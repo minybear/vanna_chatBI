@@ -343,7 +343,8 @@
         }
         .pinned-chart {
             width: 100%;
-            min-height: 220px;
+            min-height: 280px;
+            height: 280px;
         }
         .pinned-placeholder,
         .insight-placeholder {
@@ -2262,7 +2263,7 @@
                     const label = item.label;
                     const labelBadge = label ? getLabelBadgeHtml(label) : '';
                     return `
-                    <div class="pinned-card" data-pinned-item='${JSON.stringify({message_id: item.message_id, question: item.question, result: item.result, columns: item.columns, chart: item.chart, label: item.label}).replace(/'/g, "&#39;")}'>
+                    <div class="pinned-card" data-pinned-item='${JSON.stringify({message_id: item.message_id, question: item.question, result: item.result, columns: item.columns, chart: item.chart, label: item.label, intent: item.intent}).replace(/'/g, "&#39;")}'>
                         <div class="pinned-card-header">
                             <span title="${item.question || '收藏图表'}">${item.question || '收藏图表'}</span>
                             <div class="pinned-card-actions">
@@ -2286,40 +2287,45 @@
                     </div>
                 `}).join('');
 
-                items.forEach(item => {
-                    const chartContainer = document.getElementById(`pinned-chart-${item.message_id}`);
-                    if (!chartContainer) return;
-                    const hasData = Array.isArray(item.result) && item.result.length > 0
-                        && Array.isArray(item.columns) && item.columns.length > 0;
-                    let chartRendered = false;
-                    if (hasData) {
-                        try {
-                            renderG2PlotChart(chartContainer, item.result, item.columns, `pinned-${item.message_id}`);
-                            chartRendered = true;
-                        } catch (e) {
-                            console.warn('Pinned G2Plot render failed:', e);
+                // 延迟渲染，确保看板卡片已布局，与对话中一致使用 ECharts 样式
+                const renderPinnedCharts = () => {
+                    items.forEach(item => {
+                        const chartContainer = document.getElementById(`pinned-chart-${item.message_id}`);
+                        if (!chartContainer) return;
+                        const hasData = Array.isArray(item.result) && item.result.length > 0
+                            && Array.isArray(item.columns) && item.columns.length > 0;
+                        const intent = item.intent || null;
+                        let chartRendered = false;
+                        if (hasData) {
+                            try {
+                                renderECharts(chartContainer, null, item.result, item.columns, `pinned-${item.message_id}`, intent);
+                                chartRendered = true;
+                            } catch (e) {
+                                console.warn('Pinned ECharts render failed:', e);
+                            }
+                            if (!chartRendered) {
+                                try {
+                                    renderG2PlotChart(chartContainer, item.result, item.columns, `pinned-${item.message_id}`, intent);
+                                    chartRendered = true;
+                                } catch (e) {
+                                    console.warn('Pinned G2Plot render failed:', e);
+                                }
+                            }
                         }
-                    }
-                    if (!chartRendered && hasData) {
-                        try {
-                            renderECharts(chartContainer, null, item.result, item.columns, `pinned-${item.message_id}`);
-                            chartRendered = true;
-                        } catch (e) {
-                            console.warn('Pinned ECharts render failed:', e);
+                        if (!chartRendered && item.chart) {
+                            try {
+                                renderPlotlyChart(chartContainer, item.chart, `pinned-${item.message_id}`);
+                                chartRendered = true;
+                            } catch (e) {
+                                console.warn('Pinned Plotly render failed:', e);
+                            }
                         }
-                    }
-                    if (!chartRendered && item.chart) {
-                        try {
-                            renderPlotlyChart(chartContainer, item.chart, `pinned-${item.message_id}`);
-                            chartRendered = true;
-                        } catch (e) {
-                            console.warn('Pinned Plotly render failed:', e);
+                        if (!chartRendered) {
+                            chartContainer.innerHTML = '<div class="text-muted small text-center p-3">暂无图表数据</div>';
                         }
-                    }
-                    if (!chartRendered) {
-                        chartContainer.innerHTML = '<div class="text-muted small text-center p-3">暂无图表数据</div>';
-                    }
-                });
+                    });
+                };
+                requestAnimationFrame(() => { requestAnimationFrame(renderPinnedCharts); });
             } catch (e) {
                 console.error('Failed to load pinned charts', e);
                 container.innerHTML = '<div class="pinned-placeholder">加载失败，请点击刷新重试</div>';
@@ -2492,27 +2498,24 @@
         function renderFullscreenChart(container, itemData) {
             const hasData = Array.isArray(itemData.result) && itemData.result.length > 0
                 && Array.isArray(itemData.columns) && itemData.columns.length > 0;
-            
+            const intent = itemData.intent || null;
             let chartRendered = false;
-            
             if (hasData) {
                 try {
-                    renderG2PlotChart(container, itemData.result, itemData.columns, `fullscreen-${itemData.message_id}`);
-                    chartRendered = true;
-                } catch (e) {
-                    console.warn('Fullscreen G2Plot render failed:', e);
-                }
-            }
-            
-            if (!chartRendered && hasData) {
-                try {
-                    renderECharts(container, null, itemData.result, itemData.columns, `fullscreen-${itemData.message_id}`);
+                    renderECharts(container, null, itemData.result, itemData.columns, `fullscreen-${itemData.message_id}`, intent);
                     chartRendered = true;
                 } catch (e) {
                     console.warn('Fullscreen ECharts render failed:', e);
                 }
+                if (!chartRendered) {
+                    try {
+                        renderG2PlotChart(container, itemData.result, itemData.columns, `fullscreen-${itemData.message_id}`, intent);
+                        chartRendered = true;
+                    } catch (e) {
+                        console.warn('Fullscreen G2Plot render failed:', e);
+                    }
+                }
             }
-            
             if (!chartRendered && itemData.chart) {
                 try {
                     renderPlotlyChart(container, itemData.chart, `fullscreen-${itemData.message_id}`);
@@ -2521,7 +2524,6 @@
                     console.warn('Fullscreen Plotly render failed:', e);
                 }
             }
-            
             if (!chartRendered) {
                 container.innerHTML = '<div class="text-muted text-center p-5"><i class="bi bi-exclamation-circle fs-1 mb-3 d-block"></i>暂无图表数据</div>';
             }
@@ -2802,8 +2804,9 @@
             // 重置匹配标记
             chartImages.forEach(img => img._matched = false);
             
-            // 按四级标题分割报告（#### 代表具体分析小节）
-            const sections = markdown.split(/\n(?=#{3,4}\s)/);
+            // 按二级到四级标题分割报告（## / ### / #### 都作为分割点）
+            // 修复：之前只按 ### / #### 分割，导致 #### 图表N 和后续的 ## 趋势洞察 被视为同一个 section
+            const sections = markdown.split(/\n(?=#{2,4}\s)/);
             let resultHtml = '';
             // 按顺序兜底：第 1 个 #### 小节对应图 1，第 2 个对应图 2…
             let nextChartByOrder = 0;
@@ -2821,13 +2824,14 @@
                 const section = sections[i];
                 const sectionLower = section.toLowerCase();
                 const firstLine = section.split('\n')[0] || '';
+                const firstLineTrim = firstLine.trim();
                 
                 // 转换当前段落为HTML
                 let sectionHtml = renderMarkdownToHtml(section);
                 
                 let matchedInSection = false;
-                // 1. 优先通过小节标题「#### 图表N: xxx」匹配（与后端 AI 约定格式一致）
-                const headingMatch = firstLine.match(/^#{3,4}\s*图表\s*(\d+)\s*[:：]/i);
+                // 1. 优先通过小节标题「#### 图表N: xxx」匹配（支持 AI 变体如 #### 2.1 图表2: xxx）
+                const headingMatch = firstLineTrim.match(/^#{3,4}\s*(?:\d+\.\d+\s+)?图表\s*(\d+)\s*[:：]/i);
                 if (headingMatch) {
                     const chartNum = parseInt(headingMatch[1]);
                     if (chartNum > 0 && chartNum <= chartImages.length) {
@@ -2839,8 +2843,9 @@
                         }
                     }
                 }
-                // 2. 通过正文中「图表N」引用匹配
-                if (!matchedInSection) {
+                // 2. 仅在本节是「图表小节」（标题含 #### 图表N）时，才通过正文「图表N」引用匹配，避免概述等段落抢插图表导致图表二落到末尾
+                const isChartSectionHeading = /^#{3,4}\s*(?:\d+\.\d+\s+)?图表\s*\d+/i.test(firstLineTrim);
+                if (!matchedInSection && isChartSectionHeading) {
                     const chartRefs = [...section.matchAll(/\*{0,2}图表\s*(\d+)/gi)];
                     const chartNums = [...new Set(chartRefs.map(m => parseInt(m[1])))];
                     for (const chartNum of chartNums) {
@@ -2872,7 +2877,7 @@
                     }
                 }
                 // 4. 兜底：本节是「核心指标」类小节（#### 数字. 或 #### 图表N）且尚未匹配时，按顺序分配
-                const isChartLikeHeading = /^#{3,4}\s*(?:图表\s*)?\d+[\s\.:：]/.test(firstLine.trim());
+                const isChartLikeHeading = /^#{3,4}\s*(?:\d+\.\d+\s+)?(?:图表\s*)?\d+[\s\.:：]/.test(firstLineTrim);
                 if (!matchedInSection && isChartLikeHeading) {
                     while (nextChartByOrder < chartImages.length && chartImages[nextChartByOrder]._matched) nextChartByOrder++;
                     if (nextChartByOrder < chartImages.length) {
@@ -2910,8 +2915,9 @@
             // 重置匹配标记
             chartImages.forEach(img => img._matched = false);
             
-            // 按四级标题分割报告
-            const sections = markdown.split(/\n(?=#{3,4}\s)/);
+            // 按二级到四级标题分割报告（## / ### / #### 都作为分割点）
+            // 修复：之前只按 ### / #### 分割，导致 #### 图表N 和后续的 ## 趋势洞察 被视为同一个 section
+            const sections = markdown.split(/\n(?=#{2,4}\s)/);
             let resultHtml = '';
             let nextChartByOrder = 0;
             
@@ -2928,13 +2934,14 @@
                 const section = sections[i];
                 const sectionLower = section.toLowerCase();
                 const firstLine = section.split('\n')[0] || '';
+                const firstLineTrim = firstLine.trim();
                 
                 // 转换当前段落为HTML
                 let sectionHtml = renderMarkdownToHtmlForExport(section);
                 
                 let matchedInSection = false;
-                // 1. 优先通过小节标题「#### 图表N: xxx」匹配
-                const headingMatch = firstLine.match(/^#{3,4}\s*图表\s*(\d+)\s*[:：]/i);
+                // 1. 优先通过小节标题「#### 图表N: xxx」匹配（支持 AI 变体如 #### 2.1 图表2: xxx）
+                const headingMatch = firstLineTrim.match(/^#{3,4}\s*(?:\d+\.\d+\s+)?图表\s*(\d+)\s*[:：]/i);
                 if (headingMatch) {
                     const chartNum = parseInt(headingMatch[1]);
                     if (chartNum > 0 && chartNum <= chartImages.length) {
@@ -2951,8 +2958,9 @@
                         }
                     }
                 }
-                // 2. 通过正文中「图表N」引用匹配
-                if (!matchedInSection) {
+                // 2. 仅在本节是「图表小节」时通过正文「图表N」引用匹配，避免概述抢插图表
+                const isChartSectionHeading = /^#{3,4}\s*(?:\d+\.\d+\s+)?图表\s*\d+/i.test(firstLineTrim);
+                if (!matchedInSection && isChartSectionHeading) {
                     const chartRefs = [...section.matchAll(/\*{0,2}图表\s*(\d+)/gi)];
                     const chartNums = [...new Set(chartRefs.map(m => parseInt(m[1])))];
                     for (const chartNum of chartNums) {
@@ -2994,7 +3002,7 @@
                     }
                 }
                 // 4. 兜底：本节是「核心指标」类小节（#### 数字. 或 #### 图表N）且尚未匹配时，按顺序分配
-                const isChartLikeHeading = /^#{3,4}\s*(?:图表\s*)?\d+[\s\.:：]/.test(firstLine.trim());
+                const isChartLikeHeading = /^#{3,4}\s*(?:\d+\.\d+\s+)?(?:图表\s*)?\d+[\s\.:：]/.test(firstLineTrim);
                 if (!matchedInSection && isChartLikeHeading) {
                     while (nextChartByOrder < chartImages.length && chartImages[nextChartByOrder]._matched) nextChartByOrder++;
                     if (nextChartByOrder < chartImages.length) {
@@ -3022,6 +3030,8 @@
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
+                // 标题：#### 必须在 ### 前，否则 #### 会变成 # + h4
+                .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
                 .replace(/^### (.+)$/gm, '<h4>$1</h4>')
                 .replace(/^## (.+)$/gm, '<h3>$1</h3>')
                 .replace(/^# (.+)$/gm, '<h2>$1</h2>')
@@ -3039,13 +3049,14 @@
         }
         
         function renderMarkdownToHtml(markdown) {
-            // 简单的Markdown到HTML转换
+            // 简单的Markdown到HTML转换（#### 必须在 ### 前处理，否则会被 ### 吃掉）
             let html = markdown
                 // 转义HTML特殊字符（但保留换行）
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
-                // 标题
+                // 标题：从四级到一级，顺序不可颠倒
+                .replace(/^#### (.+)$/gm, '<h4 style="color: var(--vanna-navy); margin-top: 16px; margin-bottom: 8px; font-size: 1rem;">$1</h4>')
                 .replace(/^### (.+)$/gm, '<h4 style="color: var(--vanna-navy); margin-top: 20px; margin-bottom: 10px;">$1</h4>')
                 .replace(/^## (.+)$/gm, '<h3 style="color: var(--vanna-teal); margin-top: 24px; margin-bottom: 12px; border-bottom: 1px solid var(--vanna-border); padding-bottom: 8px;">$1</h3>')
                 .replace(/^# (.+)$/gm, '<h2 style="color: var(--vanna-navy); margin-bottom: 16px;">$1</h2>')
@@ -3473,46 +3484,52 @@
                         </div>
                     `;
                     
-                    // 【关键修复】如果是明细意图，不显示图表区域
-                    const isDetailIntent = runData?.intent?.intent === 'detail';
+                    // 仅当「明细意图且后端未推荐图表」时隐藏图表；若后端已推荐 preferred_chart（如饼图），则显示
+                    const isDetailIntent = runData?.intent?.intent === 'detail' && !runData?.intent?.preferred_chart;
                     const hasData = result && result.length > 0 && columns && columns.length > 0;
                     const hasPlotly = Boolean(runData?.chart);
                     if (!isDetailIntent && (hasData || hasPlotly)) {
                         try {
                             const chartCard = document.getElementById(`chart-card-${msgId}`);
                             const chartContainer = document.getElementById(`chart-container-${msgId}`);
+                            if (!chartCard || !chartContainer) return;
                             chartCard.style.display = 'block';
                             let chartRendered = false;
-                            if (hasData) {
-                                try {
-                                    renderG2PlotChart(chartContainer, result, columns, msgId, runData?.intent);
-                                    chartRendered = true;
-                                } catch (chartError) {
-                                    console.warn("G2Plot render failed:", chartError);
+                            const doRender = () => {
+                                if (hasData) {
+                                    try {
+                                        renderECharts(chartContainer, null, result, columns, msgId, runData?.intent);
+                                        chartRendered = true;
+                                    } catch (chartError) {
+                                        console.warn("ECharts render failed:", chartError);
+                                    }
+                                    if (!chartRendered) {
+                                        try {
+                                            renderG2PlotChart(chartContainer, result, columns, msgId, runData?.intent);
+                                            chartRendered = true;
+                                        } catch (chartError) {
+                                            console.warn("G2Plot render failed:", chartError);
+                                        }
+                                    }
                                 }
-                            }
-                            if (!chartRendered && hasData) {
-                                try {
-                                    renderECharts(chartContainer, null, result, columns, msgId, runData?.intent);
-                                    chartRendered = true;
-                                } catch (chartError) {
-                                    console.warn("ECharts render failed:", chartError);
+                                if (!chartRendered && hasPlotly) {
+                                    try {
+                                        renderPlotlyChart(chartContainer, runData.chart, msgId);
+                                        chartRendered = true;
+                                    } catch (chartError) {
+                                        console.warn("Plotly render failed:", chartError);
+                                    }
                                 }
-                            }
-                            if (!chartRendered && hasPlotly) {
-                                try {
-                                    renderPlotlyChart(chartContainer, runData.chart, msgId);
-                                    chartRendered = true;
-                                } catch (chartError) {
-                                    console.warn("Plotly render failed:", chartError);
+                                if (!chartRendered) {
+                                    chartContainer.innerHTML = '<div class="p-4 text-center text-muted">图表加载失败，请刷新重试</div>';
                                 }
-                            }
-                            if (!chartRendered) chartCard.style.display = 'none';
+                            };
+                            requestAnimationFrame(() => { requestAnimationFrame(doRender); });
                         } catch (e) {
                             console.error("Chart render error", e);
                         }
                     } else if (isDetailIntent) {
-                        // 明细意图，隐藏图表区域
+                        // 明细意图且无推荐图表时，隐藏图表区域
                         const chartCard = document.getElementById(`chart-card-${msgId}`);
                         if (chartCard) chartCard.style.display = 'none';
                         console.log('[DEBUG] 明细意图，不显示图表');
@@ -3692,46 +3709,53 @@
             }
             applyFeedbackButtonState(div, CHAT_HISTORY[msgId]?.feedbackType);
 
-            // 【关键修复】如果是明细意图，不显示图表区域
-            const isDetailIntent = intent?.intent === 'detail';
+            // 仅当「明细意图且未推荐图表」时隐藏图表；若有 preferred_chart（如饼图）则显示
+            const isDetailIntent = intent?.intent === 'detail' && !intent?.preferred_chart;
             const hasData = safeResult.length > 0 && safeColumns.length > 0;
             const hasPlotly = Boolean(chart);
             if (!isDetailIntent && (hasData || hasPlotly)) {
                 try {
                     const chartCard = document.getElementById(`chart-card-${msgId}`);
                     const chartContainer = document.getElementById(`chart-container-${msgId}`);
-                    chartCard.style.display = 'block';
-                    let chartRendered = false;
-                    if (hasData) {
-                        try {
-                            renderG2PlotChart(chartContainer, safeResult, safeColumns, msgId, intent);
-                            chartRendered = true;
-                        } catch (chartError) {
-                            console.warn("G2Plot render failed:", chartError);
-                        }
+                    if (chartCard && chartContainer) {
+                        chartCard.style.display = 'block';
+                        let chartRendered = false;
+                        const doRender = () => {
+                            if (hasData) {
+                                try {
+                                    renderECharts(chartContainer, null, safeResult, safeColumns, msgId, intent);
+                                    chartRendered = true;
+                                } catch (chartError) {
+                                    console.warn("ECharts render failed:", chartError);
+                                }
+                                if (!chartRendered) {
+                                    try {
+                                        renderG2PlotChart(chartContainer, safeResult, safeColumns, msgId, intent);
+                                        chartRendered = true;
+                                    } catch (chartError) {
+                                        console.warn("G2Plot render failed:", chartError);
+                                    }
+                                }
+                            }
+                            if (!chartRendered && hasPlotly) {
+                                try {
+                                    renderPlotlyChart(chartContainer, chart, msgId);
+                                    chartRendered = true;
+                                } catch (chartError) {
+                                    console.warn("Plotly render failed:", chartError);
+                                }
+                            }
+                            if (!chartRendered) {
+                                chartContainer.innerHTML = '<div class="p-4 text-center text-muted">图表加载失败，请刷新重试</div>';
+                            }
+                        };
+                        requestAnimationFrame(() => { requestAnimationFrame(doRender); });
                     }
-                    if (!chartRendered && hasData) {
-                        try {
-                            renderECharts(chartContainer, null, safeResult, safeColumns, msgId, intent);
-                            chartRendered = true;
-                        } catch (chartError) {
-                            console.warn("ECharts render failed:", chartError);
-                        }
-                    }
-                    if (!chartRendered && hasPlotly) {
-                        try {
-                            renderPlotlyChart(chartContainer, chart, msgId);
-                            chartRendered = true;
-                        } catch (chartError) {
-                            console.warn("Plotly render failed:", chartError);
-                        }
-                    }
-                    if (!chartRendered) chartCard.style.display = 'none';
                 } catch (e) {
                     console.error("Chart render error", e);
                 }
             } else if (isDetailIntent) {
-                // 明细意图，隐藏图表区域
+                // 明细意图且无推荐图表时，隐藏图表区域
                 const chartCard = document.getElementById(`chart-card-${msgId}`);
                 if (chartCard) chartCard.style.display = 'none';
                 console.log('[DEBUG] 明细意图（历史记录），不显示图表');
@@ -3743,11 +3767,24 @@
             if (!resultData || resultData.length === 0 || !columns || columns.length === 0) throw new Error('No data');
             const columnTypes = detectColumnTypes(resultData, columns);
             const chartType = detectChartType(resultData, columns, columnTypes, intent);
-            const xColumn = columns[0];
+            const valid = (col) => col && columns.includes(col);
+            let xColumn = columns[0];
             let yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
             yColumns = filterYColumnsForChart(resultData, yColumns);
             if (yColumns.length === 0) yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
             if (yColumns.length === 0) yColumns = columns.slice(1);
+            if (intent) {
+                if (chartType === 'line' && valid(intent.chart_x_col)) {
+                    xColumn = intent.chart_x_col;
+                    if (intent.chart_value_cols && Array.isArray(intent.chart_value_cols)) yColumns = intent.chart_value_cols.filter(valid);
+                    else if (valid(intent.chart_value_col)) yColumns = [intent.chart_value_col];
+                }
+                if (chartType === 'bar' && valid(intent.chart_label_col)) {
+                    xColumn = intent.chart_label_col;
+                    if (intent.chart_value_cols && Array.isArray(intent.chart_value_cols)) yColumns = intent.chart_value_cols.filter(valid);
+                    else if (valid(intent.chart_value_col)) yColumns = [intent.chart_value_col];
+                }
+            }
 
             const formatXAxisValue = (val) => {
                 if (val === null || val === undefined) return '';
@@ -3782,10 +3819,15 @@
                     chart = new G2Plot.Line(container, lineOpt);
                 }
             } else if (chartType === 'pie') {
-                const valueCol = yColumns[0];
+                const labelLike = /name|desc|描述|名称|类型|类别|label|标题|status_name|status_desc|_name|_desc/i;
+                const percentLike = /percentage|percent|占比|比例|率|份额|pct|ratio|percent_of/i;
+                const countLike = /count|cnt|数量|笔数|amount|total|value|值|status_count|biz_count|num/i;
+                let pieLabelCol = (intent && valid(intent.chart_label_col)) ? intent.chart_label_col : (columns.find(c => labelLike.test(c || '')) || columns[0]);
+                let pieValueCol = (intent && valid(intent.chart_value_col)) ? intent.chart_value_col : (columns.find(c => percentLike.test(c || '')) || columns.find(c => countLike.test(c || '')) || yColumns[0]);
+                if (!pieValueCol) pieValueCol = yColumns[0] || columns[1];
                 const data = resultData.map(row => ({
-                    category: String(row[xColumn]),
-                    value: Number(row[valueCol]) || 0
+                    category: String(row[pieLabelCol]),
+                    value: Number(row[pieValueCol]) || 0
                 }));
                 chart = new G2Plot.Pie(container, {
                     data,
@@ -3849,7 +3891,9 @@
         function renderECharts(container, chartJsonStr, resultData, columns, msgId, intent) {
             if (!resultData || resultData.length === 0 || !columns || columns.length === 0) throw new Error('No data');
             const echartsOption = smartGenerateChart(resultData, columns, intent);
-            container.style.height = '400px';
+            // 看板卡片用 280px，对话用 400px，保证同一套 ECharts 样式（渐变、配色）
+            const isPinned = (msgId && String(msgId).startsWith('pinned-'));
+            container.style.height = isPinned ? '280px' : '400px';
             const chart = echarts.init(container, null, { renderer: 'canvas', useDirtyRect: false });
             chart.setOption(echartsOption);
             CHART_INSTANCES[msgId] = { type: 'echarts', chart };
@@ -3979,10 +4023,10 @@
                 const firstVal = resultData[0]?.[xColumn];
                 if (firstVal && (firstVal.toString().match(/\d{4}[-/]\d{1,2}[-/]\d{1,2}/) || firstVal.toString().match(/\d{4}[-/]\d{1,2}/) || firstVal.toString().match(/\d{8}/))) return 'line';
             }
-            if (columnNames.match(/percent|百分比|占比|比例|rate|率|proportion|份额|distribution|分布/) && yColumns.length === 1 && resultData.length <= 10) return 'pie';
-            // 放宽：结果含占比/百分比列且有描述列（如 status_name）且行数少 → 饼图（允许多个数值列）
-            const hasLabelLikeCol = columns.some(c => /status_name|name|类型|类别|desc|描述|名称|_name/i.test(c || ''));
-            if (columnNames.match(/percent|百分比|占比|比例|rate|率|proportion|份额|distribution|分布/) && hasLabelLikeCol && resultData.length <= 15) return 'pie';
+            // 饼图：按列名语义推断（不写死列名），含占比/百分比等关键词且行数少即选饼图
+            const hasPercentLike = /percent|百分比|占比|比例|rate|率|proportion|份额|distribution|分布|pct|ratio|percent_of/i.test(columnNames);
+            if (hasPercentLike && yColumns.length === 1 && resultData.length <= 10) return 'pie';
+            if (hasPercentLike && resultData.length <= 15 && yColumns.length >= 1) return 'pie';
             if (yColumns.length === 1) {
                 const yData = resultData.map(row => Number(row[yColumns[0]]) || 0);
                 const total = yData.reduce((a, b) => a + b, 0);
@@ -4048,16 +4092,15 @@
                 return val !== null ? String(val) : '';
             });
             if (chartType === 'pie') {
+                // 优先用后端 intent 推断的列（后端也是按列名语义关键词推断，不写死列名）
                 let pieLabelCol = (intent && intent.chart_label_col && columns.includes(intent.chart_label_col)) ? intent.chart_label_col : null;
                 let pieValueCol = (intent && intent.chart_value_col && columns.includes(intent.chart_value_col)) ? intent.chart_value_col : null;
-                if (!pieLabelCol) {
-                    pieLabelCol = columns.find(c => /status_name|name|类型|类别|desc|描述|名称|_name/i.test(c || '')) || columns[0];
-                }
-                if (!pieValueCol) {
-                    pieValueCol = columns.find(c => /percentage|percent|占比|比例|率|份额/i.test(c || ''))
-                        || columns.find(c => /status_count|count|cnt|数量|笔数/i.test(c || ''))
-                        || (yColumns.length > 0 ? yColumns[0] : columns[1]);
-                }
+                // 前端兜底：按列名语义关键词推断（兼容 AI 生成的各种列名）
+                const labelLike = /name|desc|描述|名称|类型|类别|label|标题|说明|status_name|status_desc|_name|_desc/i;
+                const percentLike = /percentage|percent|占比|比例|率|份额|pct|ratio|percent_of/i;
+                const countLike = /count|cnt|数量|笔数|amount|total|value|值|status_count|biz_count|num/i;
+                if (!pieLabelCol) pieLabelCol = columns.find(c => labelLike.test(c || '')) || columns[0];
+                if (!pieValueCol) pieValueCol = columns.find(c => percentLike.test(c || '')) || columns.find(c => countLike.test(c || '')) || (yColumns[0] || columns[1]);
                 if (!columns.includes(pieValueCol)) pieValueCol = yColumns[0] || columns[1];
                 return generatePieChart(resultData, columns, pieLabelCol, [pieValueCol]);
             }
@@ -5156,6 +5199,8 @@
         
         // 存储用户编辑的字段描述
         let EDITED_FIELDS = {};
+        // 存储 DDL 质量报告中可编辑字段的完整信息（用于保存时拼出后端需要的 quality 等字段）
+        let DDL_QUALITY_FIELD_MAP = {};
         
         // 渲染 DDL 质量报告
         function renderDDLQualityReport() {
@@ -5164,6 +5209,11 @@
             
             // 重置编辑状态
             EDITED_FIELDS = {};
+            DDL_QUALITY_FIELD_MAP = {};
+            [].concat(report.needs_confirm_list || [], report.unknown_list || []).forEach(f => {
+                const key = `${f.database}.${f.table}.${f.column}`;
+                DDL_QUALITY_FIELD_MAP[key] = f;
+            });
             
             document.getElementById('ddlQualityContent').innerHTML = `
                 <div class="ddl-quality-report">
@@ -5352,9 +5402,33 @@
             await doGenerateCorpus(CURRENT_DATASOURCE_ID);
         }
         
+        // 将后端返回的 detail 转为可读字符串（可能是 string 或 422 校验对象数组）
+        function formatApiErrorDetail(detail) {
+            if (detail == null) return '保存字段描述失败';
+            if (typeof detail === 'string') return detail;
+            if (Array.isArray(detail)) return detail.map(d => d.msg || (d.loc ? `${d.loc.join('.')}: ${d.msg || ''}` : JSON.stringify(d))).join('; ') || '请求参数校验失败';
+            return String(detail);
+        }
+        
         // 保存字段描述并生成语料
         async function saveFieldsAndGenerate() {
-            const editedList = Object.values(EDITED_FIELDS);
+            // 合并完整字段信息：后端要求必填 quality 等，从 DDL_QUALITY_FIELD_MAP 取
+            const editedList = Object.entries(EDITED_FIELDS).map(([key, item]) => {
+                const base = DDL_QUALITY_FIELD_MAP[key] || {};
+                return {
+                    database: item.database,
+                    table: item.table,
+                    column: item.column,
+                    data_type: item.data_type,
+                    ddl_comment: base.ddl_comment ?? null,
+                    ai_inferred: base.ai_inferred ?? null,
+                    human_defined: item.human_defined || null,
+                    enum_values: base.enum_values ?? null,
+                    confidence: base.confidence != null ? base.confidence : 0,
+                    quality: base.quality || 'unknown',
+                    needs_review: false
+                };
+            });
             
             if (editedList.length > 0) {
                 // 显示保存中状态
@@ -5372,15 +5446,18 @@
                     });
                     
                     if (!res.ok) {
-                        const err = await res.json();
-                        throw new Error(err.detail || '保存字段描述失败');
+                        let err;
+                        try { err = await res.json(); } catch (_) { err = {}; }
+                        const msg = formatApiErrorDetail(err.detail);
+                        throw new Error(msg);
                     }
                     
                     console.log(`已保存 ${editedList.length} 个字段描述`);
                     
                 } catch(e) {
                     console.error('保存字段描述失败:', e);
-                    alert('保存失败: ' + e.message);
+                    const msg = (e && typeof e.message === 'string') ? e.message : ('保存失败: ' + (e && typeof e === 'object' ? JSON.stringify(e) : String(e)));
+                    alert('保存失败: ' + msg);
                     saveBtn.innerHTML = originalText;
                     saveBtn.disabled = false;
                     return;
@@ -5768,6 +5845,9 @@
                                                 <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 50%"></div>
                                             </div>
                                             <small class="text-muted">训练中...</small>
+                                            <button type="button" class="btn btn-sm btn-outline-danger mt-1" onclick="event.stopPropagation(); cancelKbTraining('${kb.id}')" title="取消训练">
+                                                <i class="bi bi-stop-circle me-1"></i>取消训练
+                                            </button>
                                         </div>
                                     ` : ''}
                                 </div>
@@ -5794,6 +5874,26 @@
                 
             } catch(e) {
                 container.innerHTML = `<div class="text-center text-danger p-4">加载失败: ${e.message}</div>`;
+            }
+        }
+        
+        async function cancelKbTraining(kbId) {
+            if (!confirm('确定要取消当前训练任务吗？')) return;
+            try {
+                const res = await authFetch(`/api/v0/knowledge_bases/${kbId}/training_status`);
+                const tasks = await res.json();
+                const running = tasks.find(t => t.status === 'processing' || t.status === 'pending');
+                if (!running) {
+                    alert('当前没有进行中的训练任务');
+                    loadKnowledgeBases();
+                    return;
+                }
+                const cancelRes = await authFetch(`/api/v0/training_tasks/${running.id}/cancel`, { method: 'POST' });
+                const data = await cancelRes.json();
+                alert(data.message || '已取消');
+                loadKnowledgeBases();
+            } catch(e) {
+                alert('取消失败: ' + e.message);
             }
         }
         
@@ -5961,8 +6061,11 @@
         }
         
         async function pollTrainingStatus(taskId, progressBar, statusText) {
-            const maxAttempts = 100;
+            const maxAttempts = 600;  // 约 10 分钟（每秒轮询一次）
+            const staleThresholdMs = 5 * 60 * 1000;  // 进度无变化超过 5 分钟视为可能卡住
             let attempts = 0;
+            let lastProcessed = -1;
+            let lastProgressTime = Date.now();
             
             while (attempts < maxAttempts) {
                 try {
@@ -5974,7 +6077,14 @@
                         : 50;
                     
                     progressBar.style.width = `${progress}%`;
-                    statusText.textContent = `训练中: ${task.processed_records}/${task.total_records} (成功: ${task.success_count}, 失败: ${task.fail_count})`;
+                    let statusMsg = `训练中: ${task.processed_records}/${task.total_records} (成功: ${task.success_count}, 失败: ${task.fail_count})`;
+                    if (task.processed_records !== lastProcessed) {
+                        lastProcessed = task.processed_records;
+                        lastProgressTime = Date.now();
+                    } else if (task.status === 'processing' && (Date.now() - lastProgressTime) > staleThresholdMs) {
+                        statusMsg += ' — 进度长时间未更新，可能单条语料卡住（约2分钟会自动跳过），可点「取消」后重试';
+                    }
+                    statusText.textContent = statusMsg;
                     
                     if (task.status === 'completed') {
                         progressBar.style.width = '100%';
@@ -5998,7 +6108,7 @@
                 }
             }
             
-            statusText.textContent = '训练超时，请查看知识库状态';
+            statusText.textContent = '训练轮询超时，请查看知识库状态或取消后重试';
         }
 
         // ============ 标签显示与编辑功能 ============
@@ -6415,9 +6525,14 @@
                 larkGroups.forEach(group => {
                     menuHtml += `
                         <li>
-                            <a class="dropdown-item" href="javascript:void(0)" onclick="sendReportToLarkFromModal('${group.id}', '${group.name}')">
-                                <i class="bi bi-chat-dots me-2"></i>${group.name}
+                            <a class="dropdown-item" href="javascript:void(0)" onclick="sendReportToLarkFromModal('${group.id}', '${group.name}', false)">
+                                <i class="bi bi-chat-dots me-2"></i>${group.name}（卡片）
                                 ${group.description ? `<small class="text-muted d-block">${group.description}</small>` : ''}
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="javascript:void(0)" onclick="sendReportToLarkFromModal('${group.id}', '${group.name}', true)">
+                                <i class="bi bi-file-earmark-text me-2"></i>${group.name}（富文本）
                             </a>
                         </li>
                     `;
@@ -6429,8 +6544,8 @@
             }
         }
 
-        // 从报告弹框直接发送到飞书
-        async function sendReportToLarkFromModal(groupId, groupName) {
+        // 从报告弹框直接发送到飞书。asRichText=true 时以富文本消息发送（支持图片内嵌）
+        async function sendReportToLarkFromModal(groupId, groupName, asAttachment) {
             if (!currentReportContent) {
                 alert('报告内容为空，请先生成报告');
                 return;
@@ -6452,15 +6567,15 @@
                         group_id: groupId,
                         report_content: currentReportContent,
                         chart_images: chartImages,
-                        report_type: 'insight'
+                        report_type: 'insight',
+                        as_attachment: !!asAttachment
                     })
                 });
                 
                 const data = await res.json();
                 
                 if (data.success) {
-                    // 显示成功提示
-                    showToast(`报告已成功发送到 ${groupName}`, 'success');
+                    showToast(`报告已成功发送到 ${groupName}` + (asAttachment ? '（富文本）' : '（卡片）'), 'success');
                 } else {
                     alert('发送失败: ' + (data.error || '未知错误'));
                 }
@@ -6539,6 +6654,10 @@
                                         <option value="celebration">喜报通知</option>
                                     </select>
                                 </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="larkSendAsAttachment" />
+                                    <label class="form-check-label" for="larkSendAsAttachment">以富文本消息发送（支持图片内嵌，需配置 chat_id 与应用凭证）</label>
+                                </div>
                                 <div class="text-muted small">
                                     将发送最近生成的AI洞察报告到选定的飞书群
                                 </div>
@@ -6585,6 +6704,7 @@
                 const chartImages = (typeof currentChartImages !== 'undefined' && Array.isArray(currentChartImages))
                     ? currentChartImages.map(img => img.dataUrl || img)
                     : [];
+                const asAttachment = document.getElementById('larkSendAsAttachment')?.checked || false;
                 const res = await authFetch('/api/v0/lark/send-report', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -6592,13 +6712,14 @@
                         group_id: groupId,
                         report_content: reportContent,
                         report_type: reportType,
-                        chart_images: chartImages.length ? chartImages : undefined
+                        chart_images: chartImages.length ? chartImages : undefined,
+                        as_attachment: asAttachment
                     })
                 });
                 
                 const result = await res.json();
                 if (result.success) {
-                    alert('发送成功！');
+                    alert('发送成功！' + (asAttachment ? '（富文本消息）' : '（卡片消息）'));
                     closeSendLarkModal();
                 } else {
                     alert('发送失败: ' + (result.error || '未知错误'));

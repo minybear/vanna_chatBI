@@ -366,6 +366,73 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
             "agg_hint": agg_hint,
         }
 
+    def _infer_chart_intent_with_ai(
+        self, question: str, df: pd.DataFrame, columns: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        根据问题、结果列名与数据特征，用 AI 推断图表类型及用列（更精确，尤其当用户未说「占比」但数据适合饼图时）。
+        需设置环境变量 CHART_INTENT_USE_AI=true 且 ZHIPU_API_KEY 可用。返回含 preferred_chart、chart_label_col、chart_value_col 等。
+        """
+        api_key = os.getenv("ZHIPU_API_KEY")
+        model = os.getenv("ZHIPU_YULIAO_MODEL", "GLM-4-Flash")
+        if not api_key or not model:
+            return None
+        try:
+            from zhipuai import ZhipuAI
+        except ImportError:
+            return None
+        row_count = len(df)
+        numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+        sample = df.head(2).to_dict(orient="records") if row_count > 0 else []
+        prompt = f"""根据用户问题与查询结果列信息，推断最适合的图表类型及用列。只返回 JSON，不要其他文字。
+
+用户问题：{question}
+结果列名：{columns}
+行数：{row_count}
+数值列：{numeric_cols}
+前两行示例：{sample}
+
+请按以下 JSON 格式返回（只返回 JSON）：
+{{
+  "preferred_chart": "line|bar|pie|scatter|table",
+  "chart_label_col": "用于饼图扇区名/柱状图X轴的列名（从上面列名中选）",
+  "chart_value_col": "用于饼图数值/柱状图Y轴的列名（从上面列名中选）",
+  "chart_x_col": "折线图X轴列名（若有时间列可填）",
+  "reasoning": "简短理由"
+}}
+
+规则：若结果为分类+占比/数量且行数较少（如<=15），preferred_chart 应为 pie，chart_label_col 为类别列，chart_value_col 为占比或数量列。"""
+        try:
+            client = ZhipuAI(api_key=api_key)
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=300,
+                temperature=0.1,
+            )
+            content = (resp.choices[0].message.content or "").strip()
+            if not content:
+                return None
+            if content.startswith("```"):
+                lines = content.split("\n")
+                content = "\n".join(l for l in lines if not l.strip().startswith("```"))
+            import json
+            data = json.loads(content)
+            preferred = (data.get("preferred_chart") or "").lower()
+            if preferred not in ("line", "bar", "pie", "scatter", "table"):
+                return None
+            result = {"preferred_chart": preferred}
+            if data.get("chart_label_col") and data["chart_label_col"] in columns:
+                result["chart_label_col"] = data["chart_label_col"]
+            if data.get("chart_value_col") and data["chart_value_col"] in columns:
+                result["chart_value_col"] = data["chart_value_col"]
+            if data.get("chart_x_col") and data["chart_x_col"] in columns:
+                result["chart_x_col"] = data["chart_x_col"]
+            return result
+        except Exception as e:
+            print(f"[DEBUG] AI 图表意图推断失败: {e}")
+            return None
+
     def adjust_intent_for_result(
         self, question: str, df: pd.DataFrame, columns: List[str], intent: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -377,26 +444,40 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
         row_count = len(df)
         if row_count == 0:
             return out
+        # 可选：使用 AI 根据结果列+问题推断图表类型（更精确，如数据适合饼图但用户未说「占比」）
+        if os.getenv("CHART_INTENT_USE_AI", "false").lower() == "true":
+            ai_intent = self._infer_chart_intent_with_ai(question, df, columns)
+            if ai_intent and ai_intent.get("preferred_chart"):
+                out.update(ai_intent)
+                print(f"[DEBUG] 图表意图已由 AI 推断: {ai_intent}")
+                return out
         col_lower = {c: (c or "").lower() for c in columns}
         q_lower = (question or "").lower()
         numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-        # 时间列（折线 X 轴）
-        time_keywords = ["date", "time", "dt", "day", "month", "year", "stat_date", "stat"]
+        # 时间列（折线 X 轴），避免 "stat" 匹配到 status_percentage
+        time_keywords = ["date", "time", "_dt", "day", "month", "year", "stat_date", "stat_day", "create_at", "update_at"]
         time_col = None
         for c in columns:
-            if any(kw in col_lower[c] for kw in time_keywords):
+            low = col_lower[c]
+            if any(kw in low for kw in time_keywords):
                 time_col = c
                 break
-        # 描述/类别列（柱状 X 轴、饼图扇区名）
-        label_keywords = ["status_name", "name", "类型", "类别", "desc", "描述", "名称", "_name"]
+            if low in ("dt", "date", "time", "day", "month", "year"):
+                time_col = c
+                break
+        # 描述/类别列（柱状 X 轴、饼图扇区名）：按列名语义推断，不写死列名，AI 生成任意列名只要含这些关键词即可
+        label_keywords = [
+            "name", "desc", "描述", "名称", "类型", "类别", "label", "标题", "说明", "text", "标题",
+            "status_name", "status_desc", "_name", "_desc", "type_name", "category",
+        ]
         label_col = None
         for c in columns:
             if any(kw in col_lower[c] for kw in label_keywords):
                 label_col = c
                 break
-        # 数值列：占比类 → 饼图用；计数/金额 → 柱状/折线用
-        percent_keywords = ["percentage", "percent", "占比", "比例", "率", "份额"]
-        count_keywords = ["status_count", "count", "cnt", "数量", "笔数", "amount", "sum", "total", "value", "值"]
+        # 数值列：占比类 → 饼图用；计数/金额 → 柱状/折线用。同样按语义关键词推断，不写死列名
+        percent_keywords = ["percentage", "percent", "占比", "比例", "率", "份额", "pct", "ratio", "比例值", "percent_of_total", "percent_of"]
+        count_keywords = ["count", "cnt", "数量", "笔数", "amount", "sum", "total", "value", "值", "status_count", "biz_count", "num", "数量"]
         value_col = None
         for c in columns:
             if any(kw in col_lower[c] for kw in percent_keywords):
@@ -409,8 +490,8 @@ class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
                     break
         if value_col is None and numeric_cols:
             value_col = numeric_cols[0]
-        # 数值列用于 Y 轴：优先含 count/amount/percentage 的列，排除纯 status/code/id 列
-        value_like_kw = ["count", "cnt", "amount", "sum", "total", "value", "数量", "笔数", "金额", "值", "percentage", "占比"]
+        # 数值列用于 Y 轴：按语义关键词推断（不写死列名），排除纯 status/code/id 列
+        value_like_kw = ["count", "cnt", "amount", "sum", "total", "value", "数量", "笔数", "金额", "值", "percentage", "percent", "占比", "比例", "pct", "num"]
         status_like_kw = ["status", "code", "id", "状态", "编码"]
         def _is_value_like(col: str) -> bool:
             low = col_lower.get(col, "")
@@ -1006,6 +1087,7 @@ Generate code now (code only, no explanations):
                 "10. **多数据库架构要求**: 本系统使用多数据库架构，SQL中的所有表名必须使用完全限定格式 `数据库名.表名`（例如: `SELECT * FROM database_name.table_name`）。绝不能省略数据库名，否则会导致执行错误。\n"
                 "11. **严禁参数化查询占位符**: SQL查询必须是完整可执行的语句，不要使用参数占位符如 `?` 或 `:param`。所有值必须直接嵌入SQL中（字符串用单引号包裹）。\n"
                 "12. **对话上下文**: 如果用户的问题中出现\"11月\"、\"上个月\"、\"本月\"等相对时间表述，请结合之前的对话历史和当前时间信息来理解用户的意图。\n"
+                "13. **结果列命名与图表识别**: 为便于系统自动选择合适图表，SELECT 结果列名建议包含语义标识。占比/分布类查询：类别列别名建议含 name/desc/label/名称/描述/类型/status_name 等其一，数值列别名建议含 percent/percentage/count/占比/比例/数量/status_count/status_percent 等其一（例如 AS status_name, AS status_count, AS status_percent）。趋势类：结果中应包含日期/时间列且列名含 date/time/day/month 等。排行/对比类：建议含类别名与数量/金额列。\n"
             )
         else:
             initial_prompt += (
@@ -1024,19 +1106,34 @@ Generate code now (code only, no explanations):
                 "10. **Multi-Database Architecture Requirement**: This system uses a multi-database architecture. ALL table names in SQL queries MUST use the fully qualified format `database_name.table_name` (e.g., `SELECT * FROM database_name.table_name`). Never omit the database name or the query will fail. \n"
                 "11. **NO Parameterized Queries**: The SQL must be a complete executable statement. DO NOT use parameter placeholders like `?` or `:param`. All values must be embedded directly in the SQL (strings wrapped in single quotes). \n"
                 "12. **Conversation Context**: If the user mentions relative time expressions like \"last month\" or \"this month\", use the conversation history and current time information to understand their intent. \n"
+                "13. **Result column naming for chart detection**: Use SELECT aliases that help the system pick the right chart. For proportion/distribution queries: use a category column alias containing name/desc/label/status_name and a value column containing percent/percentage/count/status_count/status_percent (e.g. AS status_name, AS status_percent). For time series: include a date/time column. For rankings: include label and count/amount columns. \n"
             )
 
         # 意图增强提示（趋势类强约束）
         if intent and intent.get("intent") == "trend":
             if user_lang == 'zh':
                 initial_prompt += (
-                    "13. **趋势类SQL强制要求**: 必须包含时间维度字段（如日期/时间列），并进行聚合统计（如 SUM/COUNT/AVG），"
+                    "14. **趋势类SQL强制要求**: 必须包含时间维度字段（如日期/时间列），并进行聚合统计（如 SUM/COUNT/AVG），"
                     "且必须包含 `GROUP BY 时间字段` 与 `ORDER BY 时间字段`，按时间升序排列。\n"
                 )
             else:
                 initial_prompt += (
-                    "13. **Trend SQL requirements**: Must include a time dimension column, an aggregate metric (SUM/COUNT/AVG), "
+                    "14. **Trend SQL requirements**: Must include a time dimension column, an aggregate metric (SUM/COUNT/AVG), "
                     "and include `GROUP BY time` plus `ORDER BY time` in ascending order.\n"
+                )
+        # 占比/分布类：强化结果列命名，便于系统识别饼图
+        if intent and intent.get("intent") == "distribution":
+            if user_lang == 'zh':
+                initial_prompt += (
+                    "14. **占比/分布类SQL结果列命名**: 本查询将用于饼图展示。SELECT 中请使用别名："
+                    "类别列别名须包含 name/desc/label/名称/类型/status_name 等其一（如 AS status_name），"
+                    "数值列别名须包含 percent/percentage/count/占比/数量/status_count/status_percent 等其一（如 AS status_count, AS status_percent）。\n"
+                )
+            else:
+                initial_prompt += (
+                    "14. **Distribution/Pie chart SQL column aliases**: This result will be used for a pie chart. "
+                    "Use SELECT aliases: category column alias must contain name/desc/label/status_name, "
+                    "value column alias must contain percent/percentage/count/status_count/status_percent (e.g. AS status_name, AS status_percent).\n"
                 )
 
         message_log = [self.system_message(initial_prompt)]

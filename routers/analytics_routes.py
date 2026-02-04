@@ -129,7 +129,7 @@ def generate_insight_report(
 1. **报告概述** - 简要说明本次分析的数据范围和时间
 2. **核心指标分析** - 对每个图表的关键指标进行深入分析。**必须**为每个图表单独设一个小节，小节标题**必须**使用以下格式（不可改写法）：
 {chart_headings_text}
-即：每个小节以四级标题 "#### 图表N: 对应图表名称" 开头，N 为 1、2、3…，名称与上面看板数据摘要中的「图表N: xxx」一致，然后在下方写该图表的分析内容。
+即：每个小节以四级标题 "#### 图表N: 对应图表名称" 开头，N 为 1、2、3…，名称与上面看板数据摘要中的「图表N: xxx」一致，然后在**该小节标题下方**写该图表的分析内容。每个图表只对应一个小节。
 3. **趋势洞察** - 识别数据中的趋势、模式和异常
 4. **业务建议** - 基于数据分析给出可操作的业务建议
 5. **风险提示** - 指出需要关注的潜在风险点
@@ -720,7 +720,7 @@ def send_report_to_lark(
     request: SendReportRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """发送洞察报告到飞书群"""
+    """发送洞察报告到飞书群（卡片消息或富文本消息）"""
     operator_id = require_operator_id(current_user)
     result = get_lark_report_sender().send_insight_report(
         group_id=request.group_id,
@@ -728,6 +728,7 @@ def send_report_to_lark(
         chart_images=request.chart_images,
         report_type=request.report_type,
         operator_id=operator_id,
+        as_rich_text=request.as_rich_text,
     )
     return result
 

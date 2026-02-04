@@ -442,6 +442,13 @@ def cancel_training_task(task_id: str):
         if success:
             return {"status": "success", "message": "训练任务已取消"}
         else:
+            # 任务已结束但知识库可能仍为 training，恢复为 ready 以便界面正确刷新
+            task = manager.get_training_task(task_id)
+            if task and task.status in ("completed", "failed", "cancelled"):
+                manager.update(
+                    task.kb_id,
+                    status="error" if task.status == "failed" else "ready",
+                )
             return {"status": "info", "message": "任务不在运行中或已完成"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

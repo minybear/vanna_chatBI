@@ -75,6 +75,7 @@ class LarkGroup(BaseModel):
     webhook_url: str
     description: Optional[str] = None
     group_type: Optional[str] = None  # alert / celebration / general
+    chat_id: Optional[str] = None  # 群聊 ID，用于发送附件消息（应用机器人必填）
     created_at: Optional[str] = None
     operator_id: Optional[str] = None
 
@@ -85,6 +86,7 @@ class LarkGroupCreateRequest(BaseModel):
     webhook_url: str
     description: Optional[str] = None
     group_type: str = "general"
+    chat_id: Optional[str] = None  # 群聊 ID，发送附件时必填
 
 
 class SendReportRequest(BaseModel):
@@ -92,7 +94,8 @@ class SendReportRequest(BaseModel):
     group_id: str
     report_content: str
     report_type: str = "insight"  # insight / alert / celebration
-    chart_images: Optional[List[str]] = None  # base64图片列表
+    chart_images: Optional[List[str]] = None  # base64 或 data URL 图片列表
+    as_rich_text: bool = False  # True=以富文本消息发送（支持图片内嵌，需配置 chat_id 与应用凭证）
 
 
 # ============ 预警/喜报相关模型 ============

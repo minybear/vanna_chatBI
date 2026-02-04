@@ -529,7 +529,7 @@ class KnowledgeBaseManager:
         
         collections = self._get_or_create_kb_collections(kb)
         
-        # 生成ID
+        # 生成ID（与内容一一对应，重复上传相同语料会得到相同 ID）
         from vanna.legacy.utils import deterministic_uuid
         
         if data_type == 'sql':
@@ -537,24 +537,25 @@ class KnowledgeBaseManager:
                 raise ValueError("SQL类型必须提供question")
             doc = json.dumps({'question': question, 'sql': content}, ensure_ascii=False)
             doc_id = deterministic_uuid(doc) + "-sql"
-            collections['sql'].add(
-                documents=[doc],
-                ids=[doc_id]
-            )
+            coll = collections['sql']
         elif data_type == 'ddl':
             doc_id = deterministic_uuid(content) + "-ddl"
-            collections['ddl'].add(
-                documents=[content],
-                ids=[doc_id]
-            )
+            coll = collections['ddl']
         elif data_type == 'documentation':
             doc_id = deterministic_uuid(content) + "-doc"
-            collections['documentation'].add(
-                documents=[content],
-                ids=[doc_id]
-            )
+            coll = collections['documentation']
         else:
             raise ValueError(f"未知的数据类型: {data_type}")
+        
+        # 已存在则跳过，避免重复调用 embedding 和写入（去重）
+        existing = coll.get(ids=[doc_id])
+        if existing and existing.get('ids'):
+            return doc_id
+        
+        if data_type == 'sql':
+            coll.add(documents=[doc], ids=[doc_id])
+        else:
+            coll.add(documents=[content], ids=[doc_id])
         
         # 更新知识库统计
         kb.updated_at = self._now()
@@ -695,6 +696,22 @@ class KnowledgeBaseManager:
         task.updated_at = self._now()
         self._save_task(task)
         return task
+    
+    def delete_training_task(self, task_id: str) -> bool:
+        """
+        从 ChromaDB 删除训练任务记录，并将对应知识库状态从 training 恢复为 ready。
+        
+        Returns:
+            是否删除成功（任务存在则 True）
+        """
+        task = self.get_training_task(task_id)
+        if not task:
+            return False
+        self.tasks_collection.delete(ids=[task_id])
+        kb = self.get(task.kb_id)
+        if kb and kb.status == "training":
+            self.update(task.kb_id, status="ready")
+        return True
     
     def get_kb_collections(self, kb_id: str) -> Optional[Dict[str, Any]]:
         """

@@ -353,6 +353,7 @@ class ChromaConversationHistory:
             "chart": message.get("chart"),
             "columns": message.get("columns"),
             "result": message.get("result"),
+            "intent": message.get("intent"),
             "datasource_id": message.get("datasource_id") or "",
             "operator_id": operator_id or "",
             "username": username or "",

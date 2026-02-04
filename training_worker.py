@@ -9,7 +9,7 @@ import pandas as pd
 from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 from knowledge_base_manager import (
     KnowledgeBaseManager,
@@ -42,6 +42,9 @@ class TrainingWorker:
     使用线程池执行训练任务，支持进度回调
     """
     
+    # 单条语料训练超时（秒），防止 embedding API 无响应导致任务一直阻塞
+    ROW_TRAINING_TIMEOUT = 120
+
     def __init__(self, kb_manager: KnowledgeBaseManager, max_workers: int = 2):
         """
         初始化训练处理器
@@ -52,6 +55,7 @@ class TrainingWorker:
         """
         self.kb_manager = kb_manager
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._timeout_executor = ThreadPoolExecutor(max_workers=4)  # 用于带超时的单条训练
         self._running_tasks: Dict[str, bool] = {}  # task_id -> is_running
     
     def start_training(self, kb_id: str, file_path: str, 
@@ -118,6 +122,7 @@ class TrainingWorker:
             processed = 0
             success = 0
             fail = 0
+            cancelled = False
             
             for idx, row in df.iterrows():
                 # 检查是否被取消
@@ -127,6 +132,8 @@ class TrainingWorker:
                         status='cancelled',
                         error_message='任务已取消'
                     )
+                    self.kb_manager.update(kb_id, status='ready')
+                    cancelled = True
                     break
                 
                 try:
@@ -141,13 +148,27 @@ class TrainingWorker:
                         processed += 1
                         continue
                     
-                    # 添加训练数据
-                    self.kb_manager.add_training_data(
+                    # 单条训练带超时，防止 embedding API 无响应导致任务一直阻塞
+                    future = self._timeout_executor.submit(
+                        self.kb_manager.add_training_data,
                         kb_id=kb_id,
                         data_type=data_type,
                         content=content,
-                        question=question
+                        question=question,
                     )
+                    try:
+                        future.result(timeout=self.ROW_TRAINING_TIMEOUT)
+                    except FuturesTimeoutError:
+                        fail += 1
+                        processed += 1
+                        print(f"[Training] [{idx+1}/{total_records}] 单条训练超时({self.ROW_TRAINING_TIMEOUT}s)，已跳过")
+                        self.kb_manager.update_training_task(
+                            task_id,
+                            processed_records=processed,
+                            success_count=success,
+                            fail_count=fail,
+                        )
+                        continue
                     
                     success += 1
                     print(f"[Training] [{idx+1}/{total_records}] 训练成功: {data_type}")
@@ -172,6 +193,10 @@ class TrainingWorker:
                         progress_callback(task_id, processed, total_records, 'processing')
                     except Exception:
                         pass
+            
+            if cancelled:
+                print(f"[Training] 任务已取消: {task_id}")
+                return
             
             # 训练完成
             final_status = 'completed' if fail == 0 else 'completed'
@@ -285,6 +310,7 @@ class TrainingWorker:
         
         # 关闭线程池
         self.executor.shutdown(wait=False)
+        self._timeout_executor.shutdown(wait=False)
 
 
 # 异步训练函数（供FastAPI BackgroundTasks使用）

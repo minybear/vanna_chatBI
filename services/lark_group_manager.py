@@ -1,9 +1,10 @@
 """飞书群管理服务。"""
 import base64
-import io
 import os
+import re
 import json
 import uuid
+import io
 import requests
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -40,6 +41,7 @@ class LarkGroupManager:
                 webhook_url=default_webhook,
                 description="默认飞书通知群",
                 group_type="general",
+                chat_id=os.getenv("LARK_CHAT_ID"),
             ))
 
         # 新的多群配置格式: LARK_GROUPS={"alert":"webhook1","celebration":"webhook2"}
@@ -271,6 +273,146 @@ class LarkReportSender:
             print(f"[LarkReportSender] 上传图片异常: {e}")
             return None
 
+    def _build_rich_text_content(
+        self,
+        report_content: str,
+        image_keys: Optional[List[str]] = None,
+        title: str = "AI 数据洞察报告",
+    ) -> Dict[str, Any]:
+        """
+        构建富文本消息内容（post 类型），支持图片。
+        参考飞书官方文档：https://feishu.apifox.cn/doc-1945306
+        
+        Args:
+            report_content: 报告正文（Markdown 格式）
+            image_keys: 已上传图片的 image_key 列表
+            title: 报告标题
+        
+        Returns:
+            富文本消息的 content 结构
+        """
+        content_blocks: List[List[Dict[str, Any]]] = []
+        
+        # 解析 Markdown 内容，转为富文本段落
+        lines = report_content.split('\n')
+        current_paragraph: List[Dict[str, Any]] = []
+        
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                # 空行，结束当前段落
+                if current_paragraph:
+                    content_blocks.append(current_paragraph)
+                    current_paragraph = []
+                continue
+            
+            # 处理标题
+            if stripped.startswith('####'):
+                if current_paragraph:
+                    content_blocks.append(current_paragraph)
+                    current_paragraph = []
+                content_blocks.append([{"tag": "text", "text": f"📌 {stripped[4:].strip()}"}])
+            elif stripped.startswith('###'):
+                if current_paragraph:
+                    content_blocks.append(current_paragraph)
+                    current_paragraph = []
+                content_blocks.append([{"tag": "text", "text": f"📋 {stripped[3:].strip()}"}])
+            elif stripped.startswith('##'):
+                if current_paragraph:
+                    content_blocks.append(current_paragraph)
+                    current_paragraph = []
+                content_blocks.append([{"tag": "text", "text": f"📊 {stripped[2:].strip()}"}])
+            elif stripped.startswith('#'):
+                if current_paragraph:
+                    content_blocks.append(current_paragraph)
+                    current_paragraph = []
+                content_blocks.append([{"tag": "text", "text": f"📈 {stripped[1:].strip()}"}])
+            elif stripped.startswith('- ') or stripped.startswith('* '):
+                # 列表项
+                if current_paragraph:
+                    content_blocks.append(current_paragraph)
+                    current_paragraph = []
+                content_blocks.append([{"tag": "text", "text": f"  • {stripped[2:]}"}])
+            else:
+                # 处理加粗文本 **text**
+                processed_text = re.sub(r'\*\*(.+?)\*\*', r'【\1】', stripped)
+                # 处理斜体 *text*
+                processed_text = re.sub(r'\*(.+?)\*', r'_\1_', processed_text)
+                current_paragraph.append({"tag": "text", "text": processed_text})
+        
+        # 添加最后一个段落
+        if current_paragraph:
+            content_blocks.append(current_paragraph)
+        
+        # 添加图表（每张图片独立一个段落）
+        if image_keys:
+            content_blocks.append([{"tag": "text", "text": "\n📊 报告图表："}])
+            for i, img_key in enumerate(image_keys[:10], 1):
+                content_blocks.append([{
+                    "tag": "img",
+                    "image_key": img_key,
+                }])
+        
+        # 添加生成时间
+        content_blocks.append([{
+            "tag": "text", 
+            "text": f"\n⏰ 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        }])
+        
+        return {
+            "zh_cn": {
+                "title": title,
+                "content": content_blocks,
+            }
+        }
+
+    def _send_rich_text_message(
+        self,
+        chat_id: str,
+        content: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        发送富文本消息（post 类型）到群聊。
+        需要配置 LARK_APP_ID、LARK_APP_SECRET。
+        
+        Args:
+            chat_id: 群聊 ID
+            content: 富文本消息内容（由 _build_rich_text_content 生成）
+        
+        Returns:
+            {"success": True/False, "error": "错误信息"}
+        """
+        token = self._get_tenant_access_token()
+        if not token:
+            return {"success": False, "error": "发送富文本消息需配置 LARK_APP_ID、LARK_APP_SECRET"}
+        
+        try:
+            resp = requests.post(
+                "https://open.feishu.cn/open-apis/im/v1/messages",
+                params={"receive_id_type": "chat_id"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                json={
+                    "receive_id": chat_id,
+                    "msg_type": "post",
+                    "content": json.dumps(content, ensure_ascii=False),
+                },
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                print(f"[LarkReportSender] 发送富文本消息 HTTP {resp.status_code}: {resp.text[:200]}")
+                return {"success": False, "error": f"HTTP {resp.status_code}"}
+            body = resp.json()
+            if body.get("code") != 0:
+                print(f"[LarkReportSender] 发送富文本消息 API 错误: {body.get('msg', body)}")
+                return {"success": False, "error": body.get("msg", "发送失败")}
+            return {"success": True}
+        except Exception as e:
+            print(f"[LarkReportSender] 发送富文本消息异常: {e}")
+            return {"success": False, "error": str(e)}
+
     def send_insight_report(
         self,
         group_id: str,
@@ -278,36 +420,68 @@ class LarkReportSender:
         chart_images: Optional[List[str]] = None,
         report_type: str = "insight",
         operator_id: str = "",
+        as_rich_text: bool = False,
     ) -> Dict[str, Any]:
         """
-        发送洞察报告到飞书群
+        发送洞察报告到飞书群。
         
         Args:
-            group_id: 飞书群ID
-            report_content: 报告内容（Markdown格式）
-            chart_images: 图表截图（base64列表）
-            report_type: 报告类型 (insight/alert/celebration)
-            operator_id: 操作者ID
-            
+            group_id: 飞书群 ID
+            report_content: 报告正文（Markdown 格式）
+            chart_images: 图表图片列表（base64 编码或 data URL）
+            report_type: 报告类型（insight/alert/celebration）
+            operator_id: 操作者 ID
+            as_rich_text: 是否以富文本消息发送（需配置 chat_id 与 LARK_APP_ID/SECRET）
+                         True: 发送富文本消息（post），支持在消息中直接展示图片
+                         False: 发送卡片消息（interactive），图片单独发送卡片
+        
         Returns:
-            {"success": bool, "error": str}
+            {"success": True/False, "error": "错误信息"}
         """
         group = self.group_manager.get_group(group_id, operator_id)
         if not group:
             return {"success": False, "error": "飞书群配置不存在"}
 
+        # 上传图片获取 image_key（无论哪种方式都需要）
+        image_keys: List[str] = []
+        if chart_images:
+            for one in chart_images[:10]:
+                img_key = self._upload_lark_image(one)
+                if img_key:
+                    image_keys.append(img_key)
+
+        # 富文本消息方式发送（支持图片内嵌）
+        if as_rich_text:
+            chat_id = group.get("chat_id") or os.getenv("LARK_CHAT_ID")
+            if not chat_id:
+                return {"success": False, "error": "发送富文本消息需配置群聊 chat_id（群配置或 LARK_CHAT_ID）"}
+            if not self._get_tenant_access_token():
+                return {"success": False, "error": "发送富文本消息需配置 LARK_APP_ID、LARK_APP_SECRET"}
+            
+            # 构建富文本消息标题
+            titles = {
+                "insight": "📊 AI 数据洞察报告",
+                "alert": "🚨 数据预警通知",
+                "celebration": "🎉 业务喜报",
+            }
+            title = titles.get(report_type, "AI 数据报告")
+            
+            # 构建富文本内容
+            rich_content = self._build_rich_text_content(
+                report_content,
+                image_keys=image_keys if image_keys else None,
+                title=title,
+            )
+            
+            # 发送富文本消息
+            return self._send_rich_text_message(chat_id, rich_content)
+
+        # 卡片消息方式发送（通过 Webhook）
         webhook_url = group.get("webhook_url")
         if not webhook_url:
             return {"success": False, "error": "Webhook URL未配置"}
 
         try:
-            # 若有图表且配置了应用凭证，先上传图片，再发「报告正文卡片 + 每张图单独卡片」
-            image_keys: List[str] = []
-            if chart_images:
-                for one in chart_images[:10]:
-                    img_key = self._upload_lark_image(one)
-                    if img_key:
-                        image_keys.append(img_key)
             # 报告正文卡片（图表单独发；若无图表或上传失败，仅正文）
             card = self._build_report_card(
                 report_content, report_type,
@@ -453,8 +627,21 @@ class LarkReportSender:
         report_type: str,
         chart_images: Optional[List[str]] = None,
         image_keys_for_card: Optional[List[str]] = None,
+        embed_images: bool = False,
     ) -> Dict[str, Any]:
-        """构建报告正文卡片。图表通过 image_keys_for_card 或单独消息发送，不在此卡片内上传。"""
+        """
+        构建报告正文卡片（interactive 类型）。
+        
+        Args:
+            content: 报告正文（Markdown 格式）
+            report_type: 报告类型（insight/alert/celebration）
+            chart_images: 原始图片数据（已废弃，保留兼容）
+            image_keys_for_card: 已上传图片的 img_key 列表
+            embed_images: 是否在卡片中内嵌显示图片（True 时图片显示在卡片内）
+        
+        Returns:
+            卡片消息结构
+        """
         colors = {
             "insight": "blue",
             "alert": "red",
@@ -476,19 +663,39 @@ class LarkReportSender:
             {"tag": "markdown", "content": content},
         ]
 
-        # 图表由 send_insight_report 单独发卡片，此处仅在没有成功上传时提示下载
-        if image_keys_for_card is not None and len(image_keys_for_card) == 0:
+        # 如果选择内嵌图片且有图片 key，则在卡片中直接显示图片
+        if embed_images and image_keys_for_card:
+            elements.append({
+                "tag": "markdown",
+                "content": "**📊 报告图表**",
+            })
+            for i, img_key in enumerate(image_keys_for_card[:5], 1):  # 卡片内最多显示5张
+                elements.append({
+                    "tag": "img",
+                    "img_key": img_key,
+                    "alt": {"tag": "plain_text", "content": f"图表{i}"},
+                })
+        # 如果有图片但上传失败，提示用户
+        elif image_keys_for_card is not None and len(image_keys_for_card) == 0:
             elements.append({
                 "tag": "note",
                 "elements": [
-                    {"tag": "plain_text", "content": "完整报告含图表请下载 HTML 查看。"},
+                    {"tag": "plain_text", "content": "⚠️ 图片上传失败，如需查看图表请使用富文本模式发送。"},
+                ],
+            })
+        # 如果有图片但不内嵌，提示图表将单独发送
+        elif image_keys_for_card and not embed_images:
+            elements.append({
+                "tag": "note",
+                "elements": [
+                    {"tag": "plain_text", "content": f"📎 报告图表将单独发送（共 {len(image_keys_for_card)} 张）"},
                 ],
             })
 
         elements.append({
             "tag": "note",
             "elements": [
-                {"tag": "plain_text", "content": f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"},
+                {"tag": "plain_text", "content": f"⏰ 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"},
             ],
         })
 
