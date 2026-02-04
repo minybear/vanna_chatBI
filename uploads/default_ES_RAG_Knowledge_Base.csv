@@ -1,0 +1,929 @@
+类型,内容,用户问题示例,业务标签
+documentation,"## db_provision.tbl_watch_subscription 表字段说明
+- activation_status: 激活状态，枚举值映射：
+  - New: 新建(0)
+  - Active: 激活(1) 
+  - Inactive: 未激活(2)
+  - In-Progress: 激活中(3)
+  - Unusable: 不可用(4)
+  - Pending-Profile-Release: 待释放(5)",查询副卡激活状态是什么含义,"激活状态,副卡状态,枚举值"
+documentation,"## db_provision.tbl_watch_subscription 表字段说明  
+- service_type: 卡类型
+  - 0: 独立号副卡
+  - 1: 一号多端(Multi-SIM)副卡",什么是一号多端和独立号,"卡类型,业务类型,一号多端"
+documentation,"## db_provision.tbl_watch_subscription 表字段说明
+- provision_status: eSIM配置状态
+  - Provision-Completed: 配置完成
+  - Deprovision-Completed: 去配置完成",eSIM配置状态有哪些,"eSIM,配置状态,Profile状态"
+documentation,"## db_provision.tbl_watch_subscription 表字段说明
+- iccid_status: DP+码号状态，枚举值：
+  - Available: 可用
+  - Allocated: 已分配  
+  - Linked: 已链接
+  - Confirmed: 已确认
+  - Released: 已释放
+  - Downloaded: 已下载
+  - Installed: 已安装
+  - Unavailable: 不可用(Deleted状态对应)",码号状态包括哪些,"码号状态,ICCID状态,DP+"
+documentation,"## db_provision.tbl_volte_service / tbl_vowifi_service 表字段说明
+- provisioning_status: 业务启用状态
+  - 6100: 已启用(Enabled)
+  - 6101: 未启用(Disabled)  
+  - 6102: 启用失败(Enable Failed)
+  - 6103: 办理中(Processing)",VoLTE业务状态有哪些,"VoLTE,VoWiFi,业务状态"
+documentation,"## db_provision.tbl_vowifi_service 表字段说明
+- tc_status: TC状态(用户同意运营商条款的状态)
+  - 0: 未同意
+  - 1: 已同意
+- address_status: 地址状态
+  - 0: 未收集
+  - 1: 已收集
+  - 2: 不需要收集(NoNeed，Dtac运营商不需要)",VoWiFi的TC状态是什么意思,"VoWiFi,TC状态,用户协议"
+documentation,"## db_provision.tbl_phoenix_service 表字段说明  
+- plan_type: 计费类型
+  - 0: 非流量计费
+  - 1: 流量计费
+- volume_cap: 流量限制(单位:GB)
+- supported_rat: 无线接入技术
+  - sub6: Sub-6GHz频段
+  - mmw: 毫米波频段",5G业务的计费类型有哪些,"5G,Phoenix,计费类型,流量"
+ddl,"-- db_provision.tbl_watch_subscription definition
+CREATE TABLE `tbl_watch_subscription` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(64) DEFAULT NULL COMMENT '副卡IMSI',
+  `msisdn` varchar(64) DEFAULT NULL COMMENT '副卡手机号',
+  `iccid` varchar(20) DEFAULT NULL COMMENT '副卡ICCID',
+  `eid` varchar(64) DEFAULT NULL COMMENT '设备EID',
+  `primary_imsi` varchar(64) DEFAULT NULL COMMENT '主卡IMSI',
+  `primary_msisdn` varchar(64) DEFAULT NULL COMMENT '主卡手机号',  
+  `primary_iccid` varchar(64) DEFAULT NULL COMMENT '主卡ICCID',
+  `activation_status` varchar(32) DEFAULT NULL COMMENT '激活状态:New/Active/Inactive/In-Progress/Unusable/Pending-Profile-Release',
+  `service_type` int(2) DEFAULT NULL COMMENT '卡类型:1=一号多端,0=独立号',
+  `provision_status` varchar(32) DEFAULT NULL COMMENT 'eSIM配置状态:Provision-Completed/Deprovision-Completed',
+  `iccid_status` varchar(16) DEFAULT NULL COMMENT 'DP+码号状态:Available/Allocated/Linked/Confirmed/Released/Downloaded/Installed/Unavailable',
+  `create_at` bigint(20) DEFAULT NULL COMMENT '记录插入时间',
+  `update_at` bigint(20) DEFAULT NULL COMMENT '记录更新时间',
+  `start_time` bigint(20) DEFAULT NULL COMMENT '业务开通成功时间',
+  `end_time` bigint(20) DEFAULT NULL COMMENT '业务注销成功时间',
+  PRIMARY KEY (`id`),
+  KEY `imsi_index` (`imsi`) USING BTREE,
+  KEY `msisdn_index` (`msisdn`) USING BTREE,
+  KEY `parent_imsi_index` (`primary_imsi`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户信息表(手表/iPad eSIM订阅)';",,用户信息表,eSIM订阅表
+ddl,"-- db_provision.account_auth definition  
+CREATE TABLE `account_auth` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(15) NOT NULL COMMENT '用户IMSI',
+  `imei` varchar(64) DEFAULT NULL COMMENT '设备IMEI',
+  `token` varchar(64) NOT NULL COMMENT '鉴权token',
+  `msisdn` varchar(20) DEFAULT NULL COMMENT '手机号码',
+  `user_agent` varchar(64) DEFAULT NULL COMMENT '用户代理',
+  `interface_type` varchar(10) DEFAULT NULL COMMENT '接口类型',
+  `create_at` datetime DEFAULT current_timestamp() COMMENT '记录插入时间',
+  `update_at` datetime DEFAULT current_timestamp() COMMENT '记录更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `imsi` (`imsi`) USING BTREE,
+  KEY `msisdn_index` (`msisdn`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户鉴权信息表';",,用户鉴权,认证表
+ddl,"-- db_provision.tbl_volte_service definition
+CREATE TABLE `tbl_volte_service` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(15) NOT NULL COMMENT '用户IMSI',
+  `msisdn` varchar(20) DEFAULT NULL COMMENT '手机号码',  
+  `iccid` varchar(20) DEFAULT NULL COMMENT 'ICCID',
+  `provisioning_status` int(11) DEFAULT NULL COMMENT '业务启用状态:6100=已启用,6101=未启用,6102=启用失败,6103=办理中',
+  `create_at` datetime DEFAULT current_timestamp() COMMENT '记录插入时间',
+  `update_at` datetime DEFAULT current_timestamp() COMMENT '记录更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `unique_imsi` (`imsi`) USING BTREE,
+  KEY `index_msisdn` (`msisdn`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='VoLTE业务状态表';",,VoLTE业务表
+ddl,"-- db_provision.tbl_vowifi_service definition  
+CREATE TABLE `tbl_vowifi_service` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(15) NOT NULL COMMENT '用户IMSI',
+  `msisdn` varchar(20) DEFAULT NULL COMMENT '手机号码',
+  `iccid` varchar(20) DEFAULT NULL COMMENT 'ICCID',  
+  `provisioning_status` int(11) DEFAULT NULL COMMENT '业务启用状态:6100=已启用,6101=未启用,6102=启用失败,6103=办理中',
+  `tc_status` tinyint(1) DEFAULT NULL COMMENT 'tc状态:0=未同意,1=已同意',
+  `address_status` tinyint(1) DEFAULT NULL COMMENT '地址状态:0=未收集,1=已收集,2=不需要',
+  `create_at` datetime DEFAULT current_timestamp() COMMENT '记录插入时间',
+  `update_at` datetime DEFAULT current_timestamp() COMMENT '记录更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `unique_imsi` (`imsi`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='VoWiFi业务状态表';",,VoWiFi业务表
+ddl,"-- db_provision.tbl_phoenix_service definition
+CREATE TABLE `tbl_phoenix_service` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(15) NOT NULL COMMENT '用户IMSI',
+  `msisdn` varchar(20) DEFAULT NULL COMMENT '手机号码',
+  `iccid` varchar(20) DEFAULT NULL COMMENT 'ICCID',
+  `provisioning_status` int(11) DEFAULT NULL COMMENT '业务启用状态',
+  `plan_type` tinyint(1) DEFAULT NULL COMMENT '计费类型:0=非流量计费,1=流量计费',
+  `volume_cap` int(11) DEFAULT NULL COMMENT '流量限制(单位:GB)',
+  `supported_rat` varchar(16) DEFAULT NULL COMMENT '无线接入技术:sub6/mmw',
+  `operator_id` varchar(32) DEFAULT NULL COMMENT '租户编码',
+  `create_at` datetime DEFAULT current_timestamp() COMMENT '记录插入时间',
+  `update_at` datetime DEFAULT current_timestamp() COMMENT '记录更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `unique_imsi` (`imsi`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='5G业务状态表(Phoenix)';",,5G业务表,Phoenix
+ddl,"-- db_stat.auth_log definition  
+CREATE TABLE `auth_log` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(20) DEFAULT NULL COMMENT 'imsi',
+  `subscriber_id` varchar(64) DEFAULT NULL COMMENT 'subscriberId',
+  `auth_type` varchar(15) DEFAULT NULL COMMENT '鉴权类型',
+  `session_id` varchar(64) DEFAULT NULL COMMENT 'sessionId',
+  `result_code` int(11) DEFAULT NULL COMMENT '结果码',
+  `result_desc` varchar(128) DEFAULT NULL COMMENT '结果描述',
+  `peer_realm` varchar(128) DEFAULT NULL COMMENT '对端域名',
+  `peer_ip` varchar(30) DEFAULT NULL COMMENT '对端IP',
+  `peer_port` int(11) DEFAULT NULL COMMENT '对端端口',
+  `create_at` datetime NOT NULL COMMENT '记录插入时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `auth_imsi_index` (`imsi`) USING BTREE,
+  KEY `auth_type_index` (`auth_type`) USING BTROW,
+  KEY `auth_result_code` (`result_code`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Diameter鉴权失败日志表';",,AAA鉴权日志,Diameter认证
+sql,"SELECT 
+  COUNT(DISTINCT imsi) as active_user_count
+FROM tbl_watch_subscription
+WHERE activation_status = 'Active'
+  AND DATE(FROM_UNIXTIME(update_at/1000)) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)",统计最近30天活跃用户数,"活跃用户,用户统计"
+sql,"SELECT 
+  w.imsi,
+  w.msisdn,
+  w.activation_status,
+  w.service_type,
+  w.primary_imsi,
+  w.primary_msisdn
+FROM tbl_watch_subscription w
+WHERE w.activation_status = 'Active'
+  AND w.service_type = 1",查询所有激活的一号多端副卡用户,"一号多端,副卡查询,激活用户"
+sql,"SELECT 
+  imsi,
+  msisdn,
+  provisioning_status,
+  CASE provisioning_status
+    WHEN 6100 THEN '已启用'
+    WHEN 6101 THEN '未启用'
+    WHEN 6102 THEN '启用失败'
+    WHEN 6103 THEN '办理中'
+    ELSE '未知状态'
+  END as status_desc
+FROM tbl_volte_service
+WHERE provisioning_status = 6100",查询所有已启用VoLTE的用户,"VoLTE,业务查询,已启用"
+sql,"SELECT 
+  DATE(FROM_UNIXTIME(create_at/1000)) as date,
+  COUNT(*) as activation_count
+FROM tbl_watch_subscription
+WHERE activation_status = 'Active'
+  AND FROM_UNIXTIME(start_time/1000) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+GROUP BY DATE(FROM_UNIXTIME(create_at/1000))
+ORDER BY date DESC",统计最近7天每天的副卡激活数量,"激活统计,每日统计,趋势分析"
+sql,"SELECT 
+  w.*,
+  a.token,
+  a.imei
+FROM tbl_watch_subscription w
+LEFT JOIN account_auth a ON w.imsi = a.imsi
+WHERE w.primary_imsi = ?
+  AND w.activation_status IN ('Active', 'In-Progress')
+ORDER BY w.create_at DESC",根据主卡IMSI查询所有关联的副卡信息,"主副卡关联,多表查询"
+sql,"SELECT 
+  parent.imsi as primary_imsi,
+  parent.msisdn as primary_msisdn,
+  child.imsi as secondary_imsi,
+  child.msisdn as secondary_msisdn,
+  child.service_type,
+  child.activation_status
+FROM tbl_watch_subscription parent
+LEFT JOIN tbl_watch_subscription child 
+  ON parent.imsi = child.primary_imsi
+WHERE parent.primary_imsi IS NULL
+  AND parent.activation_status = 'Active'",查询主卡及其所有副卡的关联信息,"主副卡,层级关系,关联查询"
+sql,"SELECT 
+  measure_type,
+  SUM(value) as total_count,
+  AVG(value) as avg_count
+FROM stat_hour
+WHERE collect_time >= DATE_FORMAT(NOW() - INTERVAL 24 HOUR, '%Y%m%d%H')
+  AND measure_type IN (
+    'AAA_AUTH_COUNT',
+    'AAA_AUTH_SUCC',
+    'VoLTE_SERVICE_ENABLE_SUCC_COUNT',
+    'VoWIFI_SERVICE_QUERY_SUCC_COUNT'
+  )
+GROUP BY measure_type",统计最近24小时各业务指标的总数和平均数,"业务指标,统计分析,小时统计"
+sql,"SELECT 
+  l.imsi,
+  l.auth_type,
+  l.result_code,
+  l.result_desc,
+  COUNT(*) as fail_count
+FROM auth_log l
+WHERE l.result_code NOT IN (-1, 0, 1001)
+  AND l.create_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
+GROUP BY l.imsi, l.auth_type, l.result_code
+HAVING COUNT(*) >= 3
+ORDER BY fail_count DESC",查询最近1小时鉴权失败次数超过3次的用户,"鉴权失败,异常统计,告警分析"
+sql,"SELECT 
+  w.primary_imsi,
+  w.primary_msisdn,
+  COUNT(*) as secondary_count,
+  SUM(CASE WHEN w.activation_status = 'Active' THEN 1 ELSE 0 END) as active_count,
+  SUM(CASE WHEN w.service_type = 1 THEN 1 ELSE 0 END) as multi_sim_count,
+  SUM(CASE WHEN w.service_type = 0 THEN 1 ELSE 0 END) as standalone_count
+FROM tbl_watch_subscription w
+WHERE w.primary_imsi IS NOT NULL
+GROUP BY w.primary_imsi, w.primary_msisdn
+HAVING secondary_count > 1",统计每个主卡下副卡的数量和类型分布,"主卡统计,副卡分布,聚合查询"
+documentation,"## 业务规则说明
+
+### 1. 用户激活状态流转规则
+- 副卡激活状态流转顺序：
+  New -> In-Progress -> Active (成功流程)
+  New -> In-Progress -> Unusable (失败流程)
+  
+- 状态流转限制：
+  * Active状态不能直接变更为其他状态(除Inactive注销)
+  * Inactive状态不允许再次激活
+  * Unusable状态可以重新激活(需清理后重新开通)
+
+### 2. 主副卡关联规则  
+- 一个主卡(primary_imsi为NULL)可关联多个副卡
+- 副卡通过primary_imsi/primary_msisdn字段关联主卡
+- 副卡类型(service_type):
+  * 一号多端(Multi-SIM): service_type=1，共享主卡号码
+  * 独立号: service_type=0，拥有独立号码",副卡状态可以如何变化,"状态流转,业务规则,激活规则"
+documentation,"## 业务规则说明
+
+### VoLTE/VoWiFi业务启用规则
+1. 业务激活流程：
+   - 用户发起激活请求 -> 状态变更为6103(办理中)
+   - ES调用运营商接口进行业务开通
+   - 开通成功 -> 状态变更为6100(已启用)
+   - 开通失败 -> 状态变更为6102(启用失败)
+
+2. 业务互斥规则：
+   - VoLTE和VoWiFi可以独立开启
+   - 部分运营商要求先开通VoLTE才能开通VoWiFi
+
+3. VoWiFi特殊规则(DTAC运营商)：
+   - tc_status必须为1(已同意条款)才能激活
+   - address_status默认为2(不需要收集地址)",VoLTE业务如何开通,"VoLTE,VoWiFi,业务开通,流程规则"
+documentation,"## 业务规则说明
+
+### 统计指标计算规则  
+1. AAA鉴权成功率计算：
+   - 成功率 = AAA_AUTH_SUCC / AAA_AUTH_COUNT * 100%
+   - 只统计result_code为0的记录为成功
+   - result_code为-1, 1001的记录不计入统计
+
+2. 活跃用户定义：
+   - 最近30天内有过鉴权成功记录的用户
+   - 或最近30天内activation_status从其他状态变更为Active的用户
+
+3. 业务成功率计算：
+   - VoLTE开通成功率 = VoLTE_SERVICE_ENABLE_SUCC_COUNT / (VoLTE_SERVICE_ENABLE_SUCC_COUNT + VoLTE_SERVICE_ENABLE_FAIL_COUNT) * 100%
+   
+4. 统计时间粒度：
+   - stat_min: 按分钟统计
+   - stat_5min: 按5分钟统计
+   - stat_15min: 按15分钟统计  
+   - stat_30min: 按30分钟统计
+   - stat_hour: 按小时统计",如何计算鉴权成功率,"成功率计算,业务指标,统计规则"
+documentation,"## 业务规则说明
+
+### eSIM Profile状态流转规则
+1. ICCID状态流转：
+   - Available(可用) -> Allocated(已分配) -> Confirmed(已确认) 
+   - Confirmed -> Downloaded(已下载) -> Installed(已安装)
+   - 任意状态 -> Released(已释放) -> Available(可用)
+   - 任意状态 -> Deleted(已删除/Unavailable)
+
+2. Provision状态说明：
+   - Provision-Completed: Profile已成功配置到SM-DP+
+   - Deprovision-Completed: Profile已从设备上删除
+
+3. 业务规则：
+   - 只有Installed状态的Profile才能正常使用
+   - Released状态的Profile可以重新分配
+   - Deleted状态的Profile不可恢复",eSIM的码号状态如何流转,"eSIM,Profile状态,状态流转"
+documentation,"## 业务规则说明
+
+### License控制规则
+1. License类型：
+   - 资源型(CAPACITY): 有数量限制，如接入用户数上限
+   - 控制型(FEATURE): 功能开关，0=禁用，1=启用
+
+2. 资源型License控制：
+   - 已使用量(used_amount) + 新增量 <= 总量(control_value)
+   - 超过限制时拒绝新增业务
+   - 示例：ACCESS_SUBSCRIBE_AMOUNT=10000，表示最多支持10000个接入用户
+
+3. 功能型License控制：  
+   - control_value=0时功能禁用，所有相关请求被拒绝
+   - control_value=1时功能启用，允许使用
+   - 示例：WEB_SHEET_ENABLED=1，表示Websheet功能已启用
+
+4. 主要License项：
+   - ACCESS_SUBSCRIBE_AMOUNT: 接入用户数限制
+   - WATCH_MULTI_SIM_ESIM_BUSINESS_LICENSE: 苹果一号多端业务
+   - WATCH_STANDALONE_ESIM_BUSINESS_LICENSE: 手表独立号业务
+   - VOLTE_BUSINESS_LICENSE: VoLTE业务
+   - VOWIFI_BUSINESS_LICENSE: VoWiFi业务",License如何控制业务开通,"License,资源控制,功能开关"
+sql,"SELECT 
+  s.measure_type,
+  s.collect_time,
+  s.value,
+  s.label,
+  CASE 
+    WHEN s.measure_type LIKE '%SUCC%' THEN '成功'
+    WHEN s.measure_type LIKE '%FAIL%' THEN '失败'
+    ELSE '总数'
+  END as metric_category
+FROM stat_min s
+WHERE s.collect_time >= DATE_FORMAT(NOW() - INTERVAL 1 HOUR, '%Y%m%d%H%i')
+  AND s.measure_type LIKE 'UE_ES_%'
+ORDER BY s.collect_time DESC, s.measure_type",查询最近1小时UE到ES的所有交互统计,"UE交互,接口统计,实时监控"
+sql,"SELECT 
+  COUNT(DISTINCT w.primary_imsi) as master_count,
+  COUNT(*) as total_secondary_count,
+  AVG(secondary_per_master.cnt) as avg_secondary_per_master
+FROM tbl_watch_subscription w
+INNER JOIN (
+  SELECT primary_imsi, COUNT(*) as cnt
+  FROM tbl_watch_subscription
+  WHERE primary_imsi IS NOT NULL
+  GROUP BY primary_imsi
+) secondary_per_master ON w.imsi = secondary_per_master.primary_imsi
+WHERE w.primary_imsi IS NULL",统计主卡总数及平均每个主卡的副卡数量,"主副卡统计,平均值,复杂聚合"
+documentation,"## 业务规则说明
+
+### 数据查询性能优化建议
+1. 核心查询字段索引：
+   - tbl_watch_subscription: imsi, msisdn, primary_imsi建有索引
+   - account_auth: imsi(唯一索引), msisdn建有索引
+   - auth_log: imsi, auth_type, result_code建有索引
+   - stat_*表: measure_type, collect_time建有索引
+
+2. 时间字段说明：
+   - create_at, update_at: 毫秒时间戳(bigint)
+   - 查询时需使用FROM_UNIXTIME(create_at/1000)转换
+   - stat表的collect_time: 格式化时间字符串(yyyyMMddHHmm)
+
+3. 关联查询建议：
+   - 主副卡关联优先使用imsi字段
+   - 避免在primary_imsi IS NULL的大表上做JOIN
+   - 统计查询优先使用预聚合的stat_hour/stat_15min表",查询性能如何优化,"性能优化,索引使用,查询建议"
+documentation,"## 系统返回码说明
+
+### 通用返回码(CommonBusinessEnum)
+- 0000: 成功(SUCCESS)
+- 1000: 系统级别错误(ES_SYSTEM_ERROR)
+- 1001: 参数错误(PARAM_INVALID)
+- 1002: 数据操作失败(DATA_OPERATE_ERROR)
+- 1003: 手动推送错误(MANUAL_PUSH_ERROR)
+
+### 客户端错误码(4xxx)
+- 4001: 参数错误(Invalid Parameter)
+- 4002: 连接SM-DP+错误(Connect to SM-DP+ error)
+- 4003: SM-DP+执行错误
+- 4004: 内部服务器错误
+- 4005: APNS推送错误
+- 4006: License禁止访问
+- 4007: 没有可用的SMDP服务器
+
+### SOAP接口返回码  
+- 0: 成功(SUCCESS)
+- 1: 失败(FAIL)
+- 2: 超过重试限制(EXCEED_RETRY_LIMIT)
+- 3: 账号被锁定(ACCOUNT_IS_BLOCKED)
+- 4: 参数无效(PARAM_INVALID)
+- 5: 超时(TIMEOUT)
+- 1000: 通用错误(GENERAL_ERROR)",系统返回码都有哪些含义,"返回码,错误码,状态码"
+documentation,"## BSS业务错误码说明
+
+### BSS业务错误码(BssEnum)
+- 0000: 成功
+- 1000: 系统级别错误
+- 1001: 参数错误
+- 4006: 文件类型不匹配(INVALID_FILE)
+- 4010: 文件不存在(FILE_NOT_FOUND)
+- 4016: 未开启权限(NO_PROVISION_INVALID)
+- 3006: iccid对应imsi关系为空(ICCID_ASSOCIATED_IMSI_IS_NULL)
+- 3007: 等待运营商操作(WAITING_OPERATOR_OPERATE)
+- 4020: 用户不存在(USER_NON_EXISTED)
+- 4021: 密码错误(PASSWORD_INCORRECT)
+- 4022: 此号码已存在(MSISDN_EXISTED)
+- 4023: 电话池资源用光(NUMBER_USE_EMPTY)
+- 4024: 套餐池资源为空(PLAN_EMPTY)
+- 4025: 电话号码不在池中(INVALID_MSISDN)
+- 4026: 电话号码已经被占用(MSISDN_IS_USED)
+- 4027: 选号超时(SELECT_MSISDN_TIME_OUT)
+- 4028: 不能删除状态不为正常状态的数据
+- 4029: 套餐不在套餐池中(INVALID_PLAN)
+- 4030: 不能更改重复的数据(REPEAT_DATA)
+- 8007: Nickname为空(NICK_NAME_EMPTY)
+- 8009: 重复的Nickname(NICK_NAME_REPEAT)",BSS业务错误码有哪些,"BSS,错误码,业务异常"
+documentation,"## 统计服务错误码说明
+
+### StatBusinessEnum错误码
+- 0000: 成功
+- 1000: 系统级别错误
+- 6001: 输入的IMSI或msisdn或iccid在系统中不存在(INPUT_ISMI_NOT_EXIST)
+- 6002: 消息跟踪任务不存在(TASK_NOT_EXIST)
+- 6003: 任务状态不允许停止，只能停止PROCESSING状态的任务(TASK_STOP_STATUS_INVALID)
+- 6004: 任务已经是启动状态(TASK_ALREADY_STARTED)
+- 6005: 该IMSI已存在正在运行的追踪任务(TASK_WITH_IMSI_EXIST)",统计服务的错误码,"统计,错误码,trace"
+documentation,"## SMS短信服务错误码说明
+
+### SmsCodeEnum错误码
+- 0000: success(成功)
+- 1000: System error(系统错误)
+- 9001: invalid verification code(验证码无效)
+- 9002: user prohibited, please try again later(用户被禁止,请稍后重试)
+- 9003: connect to smpp error(连接SMPP错误)
+- 9004: connect to sms-center error(连接短信中心错误)
+- 9005: config error(配置错误)
+
+### SMPP协议错误码(ESME_xxxx系列)
+- 9101: Message too long(消息太长)
+- 9102: Command length is invalid(命令长度无效)
+- 9103: Command ID is invalid(命令ID无效)
+- 9104: Incorrect bind status(绑定状态不正确)
+- 9105: Already bound(已经绑定)
+- 9108: System error(系统错误)
+- 9109: Invalid source address(源地址无效)
+- 9110: Invalid destination address(目标地址无效)
+- 9111: Message ID is invalid(消息ID无效)
+- 9112: Bind failed(绑定失败)
+- 9113: Invalid password(密码无效)
+- 9114: Invalid System ID(系统ID无效)
+- 9117: Message queue full(消息队列满)",短信服务错误码有哪些,"SMS,SMPP,短信错误码"
+ddl,"-- db_stat.stat_min definition (统计分钟表)
+CREATE TABLE `stat_min` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `measure_type` varchar(512) NOT NULL COMMENT '统计类型',
+  `collect_time` varchar(64) NOT NULL COMMENT 'yyyyMMddHHmm格式的时间字符串',
+  `value` bigint(20) DEFAULT NULL COMMENT '统计次数',
+  `label` varchar(512) DEFAULT NULL COMMENT 'label标签',
+  `description` text DEFAULT NULL COMMENT '描述',
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `measure_type_index` (`measure_type`) USING BTREE,
+  KEY `collect_time_index` (`collect_time`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='按分钟统计表';",,统计表,分钟统计
+ddl,"-- db_stat.control_item definition (控制项表/License表)
+CREATE TABLE `control_item` (
+  `id` varchar(64) NOT NULL COMMENT 'UUID',
+  `lic_info_id` varchar(64) NOT NULL COMMENT '签证表关联ID',
+  `control_identity` varchar(255) NOT NULL COMMENT '控制项唯一标识',
+  `control_value` int(11) NOT NULL COMMENT '资源型控制项',
+  `control_type` int(11) NOT NULL COMMENT '0为资源型,1为控制型',
+  `des_zhcn` varchar(256) DEFAULT NULL COMMENT '控制项中文描述',
+  `des_enus` varchar(256) DEFAULT NULL COMMENT '控制项英文描述',
+  `used_amount` int(11) DEFAULT 0 COMMENT '资源型控制项的已使用量',
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",,License控制表
+documentation,"## 统计指标measure_type说明
+
+### UE到ES交互类指标(UE_ES_开头)
+- UE_ES_INTERACT_COUNT: UE到ES请求总次数
+- UE_ES_GET_SIM_STATUS_REQ_SUCC_COUNT: Multi-SIM查询成功次数
+- UE_ES_GET_SIM_STATUS_REQ_FAIL_COUNT: Multi-SIM查询失败次数
+- UE_ES_SIGN_UP_FOR_SIM_STATUS_REQ_SUCC_COUNT: Multi-SIM注册成功次数
+- UE_ES_SIGN_UP_FOR_SIM_STATUS_REQ_FAIL_COUNT: Multi-SIM注册失败次数
+- UE_ES_GET_PHONE_NUMBER_REQ_SUCC_COUNT: GetPhoneNumber请求成功次数
+- UE_ES_GET_PHONE_NUMBER_REQ_FAIL_COUNT: GetPhoneNumber请求失败次数
+- UE_ES_GET_PHONE_SERVICES_ACCOUNT_STATUS_REQ_SUCC_COUNT: VoWiFi注册请求成功次数
+- UE_ES_GET_PHONE_SERVICES_ACCOUNT_STATUS_REQ_FAIL_COUNT: VoWiFi注册请求失败次数
+- UE_ES_ECS_ORDER_REQ_SUCC_COUNT: ECS套餐订购请求成功次数
+- UE_ES_ECS_ORDER_REQ_FAIL_COUNT: ECS套餐订购请求失败次数
+
+### AAA鉴权类指标
+- AAA_AUTH_COUNT: AAA鉴权总次数
+- AAA_AUTH_SUCC: AAA鉴权成功次数
+
+### APNS推送类指标
+- APNS_PUSH_SUCC_COUNT: IOS APNS推送成功次数
+- APNS_PUSH_FAIL_COUNT: IOS APNS推送失败次数",统计指标类型有哪些,"measure_type,统计指标,KPI"
+documentation,"## 统计指标measure_type说明(续)
+
+### VoLTE业务类指标
+- VoLTE_SERVICE_QUERY_SUCC_COUNT: VoLTE查询服务请求成功次数
+- VoLTE_SERVICE_QUERY_FAIL_COUNT: VoLTE查询服务请求失败次数
+- VoLTE_SERVICE_ENABLE_SUCC_COUNT: VoLTE启用服务请求成功次数
+- VoLTE_SERVICE_ENABLE_FAIL_COUNT: VoLTE启用服务请求失败次数
+
+### VoWiFi业务类指标
+- VoWIFI_SERVICE_QUERY_SUCC_COUNT: VoWiFi查询服务请求成功次数
+- VoWIFI_SERVICE_QUERY_FAIL_COUNT: VoWiFi查询服务请求失败次数
+
+### SOAP接口通知类指标
+- SOAP_NOTIFY_MUTIL_SIM_ADD_SUCC_COUNT: SOAP通知Multi-SIM副卡开通成功
+- SOAP_NOTIFY_MUTIL_SIM_REMOVE_SUCC_COUNT: SOAP通知Multi-SIM副卡注销成功
+- SOAP_NOTIFY_LINKED_SIM_ADD_SUCC_COUNT: SOAP通知独立号副卡开通成功
+- SOAP_NOTIFY_LINKED_SIM_REMOVE_SUCC_COUNT: SOAP通知独立号副卡注销成功
+- SOAP_NOTIFY_ESIM_TRANSFER_SUCC_COUNT: SOAP通知eSIM转移成功
+- SOAP_NOTIFY_ESIM_TRANSFER_FAIL_COUNT: SOAP通知eSIM转移失败
+- SOAP_NOTIFY_MASTER_SIM_CARD_CHANGE_SUCC_COUNT: SOAP通知主卡换卡成功
+- SOAP_NOTIFY_MASTER_SIM_CARD_CHANGE_FAIL_COUNT: SOAP通知主卡换卡失败
+- SOAP_NOTIFY_MASTER_SIM_MSISDN_CHANGE_SUCC_COUNT: SOAP通知主卡号码变更成功
+- SOAP_NOTIFY_MASTER_SIM_MSISDN_CHANGE_FAIL_COUNT: SOAP通知主卡号码变更失败
+- SOAP_NOTIFY_MASTER_SIM_REMOVE_SUCC_COUNT: SOAP通知主卡注销成功
+- SOAP_NOTIFY_FULL_MODE_SUCC_COUNT: SOAP全量接口处理成功
+- SOAP_NOTIFY_FULL_MODE_FAIL_COUNT: SOAP全量接口处理失败",SOAP通知相关的统计指标,"SOAP,通知,统计指标"
+documentation,"## 统计指标measure_type说明(续2)
+
+### ESIM Client类指标
+- ESIM_CLIENT_CONFIRM_ORDER_REQ_SUCC_COUNT: ESIM客户端ConfirmOrder请求成功次数
+- ESIM_CLIENT_CONFIRM_ORDER_REQ_FAIL_COUNT: ESIM客户端ConfirmOrder请求失败次数
+- ESIM_CLIENT_DOWNLOAD_ORDER_REQ_SUCC_COUNT: ESIM客户端DownloadOrder请求成功次数
+- ESIM_CLIENT_DOWNLOAD_ORDER_REQ_FAIL_COUNT: ESIM客户端DownloadOrder请求失败次数
+- ESIM_CLIENT_RELEASE_ORDER_REQ_SUCC_COUNT: ESIM客户端ReleaseOrder请求成功次数
+- ESIM_CLIENT_RELEASE_ORDER_REQ_FAIL_COUNT: ESIM客户端ReleaseOrder请求失败次数
+- ESIM_CLIENT_CANCEL_ORDER_REQ_SUCC_COUNT: ESIM客户端CancelOrder请求成功次数
+- ESIM_CLIENT_CANCEL_ORDER_REQ_FAIL_COUNT: ESIM客户端CancelOrder请求失败次数",eSIM客户端的统计指标,"eSIM Client,SM-DP+,统计"
+sql,"SELECT 
+  v.imsi,
+  v.msisdn,
+  v.provisioning_status,
+  w.imsi as vowifi_imsi,
+  w.provisioning_status as vowifi_status,
+  w.tc_status,
+  w.address_status
+FROM tbl_volte_service v
+LEFT JOIN tbl_vowifi_service w ON v.imsi = w.imsi
+WHERE v.provisioning_status = 6100
+  AND (w.provisioning_status IS NULL OR w.provisioning_status != 6100)",查询已开通VoLTE但未开通VoWiFi的用户,"VoLTE,VoWiFi,关联查询,业务对比"
+sql,"SELECT 
+  DATE(FROM_UNIXTIME(l.create_at)) as date,
+  l.result_code,
+  COUNT(*) as fail_count,
+  COUNT(DISTINCT l.imsi) as user_count
+FROM auth_log l
+WHERE l.result_code NOT IN (-1, 0, 1001)
+  AND l.create_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+GROUP BY DATE(FROM_UNIXTIME(l.create_at)), l.result_code
+ORDER BY date DESC, fail_count DESC",统计最近7天每天的鉴权失败次数和用户数,"鉴权失败,每日统计,异常分析"
+sql,"SELECT 
+  w.imsi,
+  w.msisdn,
+  w.primary_imsi,
+  w.activation_status,
+  w.service_type,
+  log.action as last_action,
+  log.result as last_result,
+  FROM_UNIXTIME(log.create_at/1000) as last_operation_time
+FROM tbl_watch_subscription w
+LEFT JOIN (
+  SELECT imsi, action, result, create_at,
+    ROW_NUMBER() OVER (PARTITION BY imsi ORDER BY create_at DESC) as rn
+  FROM biz_watch_log
+) log ON w.imsi = log.imsi AND log.rn = 1
+WHERE w.activation_status = 'Unusable'
+ORDER BY w.update_at DESC",查询所有不可用状态的副卡及其最后一次操作记录,"副卡,异常状态,操作日志,窗口函数"
+sql,"SELECT 
+  c.control_identity,
+  c.des_zhcn,
+  c.control_type,
+  c.control_value,
+  c.used_amount,
+  CASE 
+    WHEN c.control_type = 0 THEN CONCAT(ROUND(c.used_amount/c.control_value*100, 2), '%')
+    ELSE IF(c.control_value=0, '禁用', '启用')
+  END as usage_status,
+  c.control_value - c.used_amount as remaining
+FROM control_item c
+WHERE c.lic_info_id = (SELECT id FROM lic_info ORDER BY create_time DESC LIMIT 1)
+ORDER BY c.control_type, c.used_amount/c.control_value DESC",查询当前License使用情况和剩余量,"License,资源使用,容量监控"
+sql,"SELECT 
+  s.measure_type,
+  s.collect_time,
+  s.value,
+  LAG(s.value) OVER (PARTITION BY s.measure_type ORDER BY s.collect_time) as prev_value,
+  s.value - LAG(s.value) OVER (PARTITION BY s.measure_type ORDER BY s.collect_time) as delta
+FROM stat_hour s
+WHERE s.collect_time >= DATE_FORMAT(NOW() - INTERVAL 48 HOUR, '%Y%m%d%H')
+  AND s.measure_type IN ('AAA_AUTH_COUNT', 'AAA_AUTH_SUCC')
+ORDER BY s.measure_type, s.collect_time DESC",查询最近48小时鉴权指标的环比变化,"环比,趋势分析,窗口函数,同比"
+documentation,"## 业务规则说明
+
+### eSIM Profile通知点(NotificationPoint)说明
+- NotificationPoint ID与ICCID状态的映射关系：
+  * 1: ELIGIBILITY状态通知点
+  * 2: CONFIRMATION状态通知点
+  * 3: DOWNLOAD状态通知点
+  * 4: INSTALLATION状态通知点
+  * 100: DELETED状态通知点
+  * -1: Available/Allocated/Linked/Confirmed/Released等状态(无对应通知点)
+
+### 业务规则：
+- SM-DP+在Profile状态变更时会向ES发送通知
+- ES根据NotificationPoint ID判断Profile当前状态
+- NotificationPoint=4(INSTALLATION)表示Profile已成功安装到设备",NotificationPoint是什么意思,"eSIM,NotificationPoint,状态通知"
+documentation,"## 业务规则说明
+
+### 主副卡业务类型(service_type)详细说明
+
+#### 一号多端(Multi-SIM, service_type=1)
+- 副卡与主卡共享同一个MSISDN号码
+- primary_msisdn字段记录共享的主卡号码
+- 适用场景：Apple Watch、iPad等设备与iPhone共享号码
+- 接口类型(interface_type)：APPLE、GSMA
+
+#### 独立号(Standalone, service_type=0)  
+- 副卡拥有独立的MSISDN号码
+- msisdn字段记录副卡自己的独立号码
+- primary_msisdn记录关联的主卡号码(用于关系绑定)
+- 适用场景：独立使用的智能手表、平板等
+
+#### 业务限制规则：
+- 一个主卡最多可关联的副卡数量受License控制
+- Multi-SIM业务需要运营商支持一号多端功能
+- 独立号业务需要运营商分配独立的MSISDN号码资源",一号多端和独立号有什么区别,"一号多端,独立号,业务类型,Multi-SIM"
+ddl,"-- db_provision.biz_watch_log definition (业务日志表)
+CREATE TABLE `biz_watch_log` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `imsi` varchar(15) DEFAULT NULL COMMENT 'IMSI',
+  `msisdn` varchar(20) DEFAULT NULL COMMENT '手机号码',
+  `imei` varchar(20) DEFAULT NULL COMMENT 'IMEI',
+  `terminal_type` varchar(20) DEFAULT NULL COMMENT '终端类型',
+  `service_type` varchar(10) DEFAULT NULL COMMENT '服务类型',
+  `display_name` varchar(64) DEFAULT NULL COMMENT '显示名称',
+  `eid` varchar(32) DEFAULT NULL COMMENT 'EID',
+  `iccid` varchar(20) DEFAULT NULL COMMENT 'ICCID',
+  `primary_iccid` varchar(20) DEFAULT NULL COMMENT '主卡ICCID',
+  `primary_imsi` varchar(15) DEFAULT NULL COMMENT '主卡IMSI',
+  `primary_msisdn` varchar(20) DEFAULT NULL COMMENT '主卡MSISDN',
+  `action` varchar(64) DEFAULT NULL COMMENT '业务动作',
+  `biz_name` varchar(128) DEFAULT NULL COMMENT '业务名称',
+  `result` varchar(20) NOT NULL COMMENT '执行结果',
+  `reason` varchar(2048) DEFAULT NULL COMMENT '原因描述',
+  `ue_interface` varchar(10) DEFAULT NULL COMMENT 'UE接口类型',
+  `create_at` bigint(20) NOT NULL COMMENT '创建时间(毫秒时间戳)',
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `msisdn_index` (`msisdn`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户业务办理记录表';",,业务日志表,操作记录
+ddl,"-- db_stat.trace_span definition (消息跟踪节点表)
+CREATE TABLE `trace_span` (
+  `id` varchar(64) NOT NULL COMMENT 'SPAN ID',
+  `trace_id` varchar(64) NOT NULL COMMENT 'TRACE ID',
+  `service_id` varchar(128) DEFAULT NULL COMMENT '服务ID或名称',
+  `parent_id` varchar(64) DEFAULT NULL COMMENT 'PARENT ID',
+  `service_instance_id` varchar(128) DEFAULT NULL COMMENT '服务实例ID',
+  `msg_direction` varchar(128) NOT NULL COMMENT '消息方向:REQUEST/RESPONSE',
+  `interface_type` varchar(128) DEFAULT NULL COMMENT '接口类型',
+  `msg_interface` varchar(128) DEFAULT NULL COMMENT '消息接口',
+  `msg_type` varchar(256) DEFAULT NULL COMMENT '消息类型',
+  `status` varchar(64) DEFAULT NULL COMMENT '消息状态',
+  `msg_content` longtext DEFAULT NULL COMMENT '消息内容',
+  `imsi` varchar(256) DEFAULT NULL COMMENT '主卡IMSI',
+  `msisdn` varchar(256) DEFAULT NULL COMMENT '电话号码',
+  `iccid` varchar(256) DEFAULT NULL COMMENT 'ICCID',
+  `task_id` varchar(4096) DEFAULT NULL COMMENT 'taskId',
+  `create_at` bigint(20) NOT NULL COMMENT '记录插入时间',
+  `addition_data` longtext DEFAULT NULL COMMENT '附加数据',
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `imsi_index` (`imsi`) USING BTREE,
+  KEY `msisdn_index` (`msisdn`) USING BTREE,
+  KEY `task_id_index` (`task_id`(768)) USING BTREE,
+  KEY `parent_id_index` (`parent_id`) USING BTREE,
+  KEY `trace_id_index` (`trace_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息跟踪节点信息表';",,消息跟踪表,Trace
+ddl,"-- db_stat.trace_task definition (消息跟踪任务表)
+CREATE TABLE `trace_task` (
+  `id` varchar(64) NOT NULL COMMENT 'ID',
+  `status` varchar(64) NOT NULL COMMENT '任务状态:PROCESSING/STOPPED',
+  `period` bigint(20) NOT NULL COMMENT '跟踪时长(秒)',
+  `imsi` varchar(256) DEFAULT NULL COMMENT '主卡IMSI',
+  `msisdn` varchar(256) DEFAULT NULL COMMENT '电话号码',
+  `iccid` varchar(256) DEFAULT NULL COMMENT 'ICCID',
+  `create_at` bigint(20) NOT NULL COMMENT '记录插入时间',
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息跟踪任务信息表';",,跟踪任务表,Trace Task
+ddl,"-- db_provision.esim_transfer_log definition (eSIM转移日志表)
+CREATE TABLE `esim_transfer_log` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `source_imsi` varchar(64) DEFAULT NULL COMMENT '原设备IMSI',
+  `msisdn` varchar(64) DEFAULT NULL COMMENT 'msisdn',
+  `source_iccid` varchar(20) DEFAULT NULL COMMENT '原设备iccid',
+  `source_eid` varchar(32) DEFAULT NULL COMMENT '原设备eid',
+  `source_imei` varchar(64) DEFAULT NULL COMMENT '原设备imei',
+  `source_terminal_type` varchar(64) DEFAULT NULL COMMENT '原设备终端类型',
+  `target_imsi` varchar(64) DEFAULT NULL COMMENT '目标设备imsi',
+  `target_iccid` varchar(20) DEFAULT NULL COMMENT '目标设备iccid',
+  `target_eid` varchar(32) DEFAULT NULL COMMENT '目标设备eid',
+  `target_imei` varchar(64) DEFAULT NULL COMMENT '目标设备imei',
+  `target_terminal_type` varchar(64) DEFAULT NULL COMMENT '目标终端类型',
+  `transfer_type` varchar(64) DEFAULT NULL COMMENT '转移类型',
+  `result` varchar(255) DEFAULT NULL COMMENT '结果:success/fail',
+  `reason` varchar(255) DEFAULT NULL COMMENT '原因',
+  `create_time` bigint(20) DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `imsi` (`source_imsi`) USING BTREE,
+  KEY `msisdn` (`msisdn`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='eSIM转移日志表';",,eSIM转移日志,设备转移
+sql,"SELECT 
+  l.*,
+  w.activation_status,
+  w.service_type
+FROM biz_watch_log l
+LEFT JOIN tbl_watch_subscription w ON l.imsi = w.imsi
+WHERE (l.imsi IN (
+    SELECT IFNULL(primary_imsi, imsi) 
+    FROM biz_watch_log 
+    WHERE imsi = ? OR msisdn = ? OR iccid = ?
+  ) OR l.primary_imsi IN (
+    SELECT IFNULL(primary_imsi, imsi) 
+    FROM biz_watch_log 
+    WHERE imsi = ? OR msisdn = ? OR iccid = ?
+  ))
+  AND l.create_at >= ?
+  AND l.create_at <= ?
+ORDER BY l.create_at DESC
+LIMIT ?, ?",查询用户的业务办理记录(含主副卡关联),"业务日志,操作记录,主副卡查询"
+sql,"SELECT 
+  t.trace_id,
+  t.service_id,
+  t.msg_type,
+  t.status,
+  t.create_at,
+  COUNT(*) OVER (PARTITION BY t.trace_id) as span_count,
+  ROW_NUMBER() OVER (PARTITION BY t.trace_id ORDER BY t.create_at) as seq_no
+FROM trace_span t
+WHERE t.imsi = ?
+  AND t.create_at >= ?
+  AND t.create_at <= ?
+ORDER BY t.trace_id, t.create_at",查询用户的消息跟踪链路信息,"消息跟踪,Trace,链路追踪"
+sql,"SELECT 
+  DATE(FROM_UNIXTIME(l.create_at/1000)) as date,
+  l.action,
+  l.result,
+  COUNT(*) as count,
+  COUNT(DISTINCT l.imsi) as user_count
+FROM biz_watch_log l
+WHERE l.create_at >= UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL 30 DAY)) * 1000
+GROUP BY DATE(FROM_UNIXTIME(l.create_at/1000)), l.action, l.result
+ORDER BY date DESC, count DESC",统计最近30天的业务操作分布情况,"业务统计,操作统计,每日统计"
+sql,"SELECT 
+  trf.source_imsi,
+  trf.msisdn,
+  trf.source_eid,
+  trf.target_eid,
+  trf.transfer_type,
+  trf.result,
+  FROM_UNIXTIME(trf.create_time/1000) as transfer_time,
+  w_source.activation_status as source_status,
+  w_target.activation_status as target_status
+FROM esim_transfer_log trf
+LEFT JOIN tbl_watch_subscription w_source 
+  ON trf.source_imsi = w_source.imsi
+LEFT JOIN tbl_watch_subscription w_target 
+  ON trf.target_imsi = w_target.imsi
+WHERE trf.msisdn = ?
+  AND trf.result = 'success'
+ORDER BY trf.create_time DESC",查询用户的eSIM转移历史记录,"eSIM转移,设备变更,历史记录"
+sql,"SELECT 
+  tt.id as task_id,
+  tt.status,
+  tt.imsi,
+  tt.period,
+  FROM_UNIXTIME(tt.create_at/1000) as task_start_time,
+  COUNT(ts.id) as span_count,
+  MAX(ts.create_at) as last_span_time
+FROM trace_task tt
+LEFT JOIN trace_span ts ON tt.id = ts.task_id
+WHERE tt.status = 'PROCESSING'
+  AND tt.create_at >= UNIX_TIMESTAMP(NOW() - INTERVAL 24 HOUR) * 1000
+GROUP BY tt.id, tt.status, tt.imsi, tt.period, tt.create_at
+ORDER BY tt.create_at DESC",查询正在运行的消息跟踪任务及其span数量,"跟踪任务,监控,运行状态"
+sql,"SELECT 
+  l.action,
+  l.result,
+  COUNT(*) as total_count,
+  COUNT(DISTINCT l.imsi) as user_count,
+  AVG(CASE WHEN l.result = 'success' THEN 1 ELSE 0 END) * 100 as success_rate,
+  COUNT(CASE WHEN l.result = 'fail' THEN 1 END) as fail_count
+FROM biz_watch_log l
+WHERE l.create_at >= UNIX_TIMESTAMP(NOW() - INTERVAL 1 HOUR) * 1000
+GROUP BY l.action, l.result
+HAVING total_count > 10
+ORDER BY total_count DESC",统计最近1小时各业务动作的成功率,"成功率,业务监控,实时统计"
+documentation,"## 业务规则说明
+
+### 业务日志(biz_watch_log)记录规则
+1. 记录时机：
+   - 副卡开通(add)：成功或失败都记录
+   - 副卡注销(remove)：成功或失败都记录
+   - 副卡激活状态变更：记录状态变更操作
+   - eSIM Profile下载/安装：记录各阶段操作
+
+2. 日志查询规则：
+   - 支持通过imsi/msisdn/iccid任一字段查询
+   - 自动关联主副卡：查询副卡时返回所有关联主副卡的日志
+   - 时间范围：create_at为毫秒时间戳
+   - 分页限制：pageSize最大1000条
+
+3. 常见业务动作(action)：
+   - add: 开通副卡
+   - remove: 注销副卡
+   - activate: 激活
+   - deactivate: 停用
+   - transfer: eSIM转移",如何查询用户的业务办理记录,"业务日志,操作记录,查询规则"
+documentation,"## 业务规则说明
+
+### 消息跟踪(Trace)功能说明
+1. Trace任务创建：
+   - 通过imsi/msisdn/iccid创建跟踪任务
+   - 指定跟踪时长(period，单位:秒)
+   - 任务状态：PROCESSING(运行中)、STOPPED(已停止)
+
+2. Trace Span记录规则：
+   - 每个接口调用产生一个Span记录
+   - trace_id: 整个业务流程的唯一标识
+   - span_id: 单个接口调用的唯一标识
+   - parent_id: 父Span ID，用于构建调用链
+
+3. 消息方向(msg_direction)：
+   - REQUEST: 请求消息
+   - RESPONSE: 响应消息
+
+4. 使用场景：
+   - 业务流程追踪
+   - 问题排查定位
+   - 性能分析
+   - 接口调用链分析",消息跟踪功能如何使用,"Trace,消息跟踪,链路追踪"
+sql,"WITH 
+error_stats AS (
+  SELECT 
+    DATE(FROM_UNIXTIME(create_at/1000)) as date,
+    action,
+    COUNT(*) as error_count
+  FROM biz_watch_log
+  WHERE result = 'fail'
+    AND create_at >= UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL 7 DAY)) * 1000
+  GROUP BY DATE(FROM_UNIXTIME(create_at/1000)), action
+),
+total_stats AS (
+  SELECT 
+    DATE(FROM_UNIXTIME(create_at/1000)) as date,
+    action,
+    COUNT(*) as total_count
+  FROM biz_watch_log
+  WHERE create_at >= UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL 7 DAY)) * 1000
+  GROUP BY DATE(FROM_UNIXTIME(create_at/1000)), action
+)
+SELECT 
+  t.date,
+  t.action,
+  COALESCE(e.error_count, 0) as error_count,
+  t.total_count,
+  ROUND(COALESCE(e.error_count, 0) / t.total_count * 100, 2) as error_rate
+FROM total_stats t
+LEFT JOIN error_stats e ON t.date = e.date AND t.action = e.action
+ORDER BY t.date DESC, error_rate DESC",查询最近7天各业务动作的错误率趋势,"错误率,CTE,趋势分析"
+sql,"SELECT 
+  w.primary_imsi,
+  w.primary_msisdn,
+  COUNT(DISTINCT w.imsi) as secondary_count,
+  SUM(CASE WHEN w.activation_status = 'Active' THEN 1 ELSE 0 END) as active_count,
+  COUNT(DISTINCT l.id) as operation_count,
+  MAX(l.create_at) as last_operation_time,
+  STRING_AGG(DISTINCT w.device_vendor_name, ',') as device_types
+FROM tbl_watch_subscription w
+LEFT JOIN biz_watch_log l 
+  ON w.primary_imsi = l.primary_imsi
+  AND l.create_at >= UNIX_TIMESTAMP(NOW() - INTERVAL 30 DAY) * 1000
+WHERE w.primary_imsi IS NOT NULL
+GROUP BY w.primary_imsi, w.primary_msisdn
+HAVING secondary_count > 1
+ORDER BY operation_count DESC, active_count DESC
+LIMIT 100",查询最活跃的主卡用户TOP100(含操作次数),"活跃用户,TOP查询,聚合分析"
+documentation,"## 业务规则说明
+
+### eSIM转移(Transfer)业务规则
+1. 转移类型(transfer_type)：
+   - device_change: 设备更换(同型号设备间转移)
+   - device_upgrade: 设备升级(不同型号设备间转移)
+   - profile_transfer: Profile转移
+
+2. 转移流程：
+   - 源设备Profile状态变更为Released
+   - 创建新的Profile分配给目标设备
+   - 目标设备下载并安装Profile
+   - 记录转移日志
+
+3. 转移限制：
+   - 源设备Profile必须为Installed状态
+   - 目标设备必须支持eSIM功能
+   - 一个Profile同一时间只能在一个设备上激活
+
+4. 数据一致性：
+   - IMSI保持不变
+   - MSISDN保持不变
+   - ICCID通常会变更(分配新的Profile)
+   - EID变更(不同设备的EID不同)",eSIM转移的流程是什么,"eSIM转移,设备变更,业务流程"
+

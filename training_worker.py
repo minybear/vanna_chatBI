@@ -3,9 +3,10 @@
 支持后台训练、进度追踪、错误处理
 """
 import os
+import csv
 import asyncio
 import pandas as pd
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +16,24 @@ from knowledge_base_manager import (
     TrainingTask,
     get_kb_manager
 )
+
+
+def _read_training_csv(file_path: str) -> pd.DataFrame:
+    """
+    读取训练用 CSV，兼容多行内容、引号内逗号、以及「业务标签」列未加引号含逗号的情况。
+    若某行被解析为超过 4 列，将第 5 列及之后合并回第 4 列（业务标签）。
+    """
+    with open(file_path, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        rows: List[List[str]] = []
+        for row in reader:
+            if len(row) > 4:
+                # 业务标签列未加引号导致被拆成多列，合并回第 4 列
+                row = row[:3] + [",".join(row[3:])]
+            rows.append(row)
+    if not rows:
+        return pd.DataFrame(columns=["类型", "内容", "用户问题示例", "业务标签"])
+    return pd.DataFrame(rows[1:], columns=rows[0])
 
 
 class TrainingWorker:
@@ -48,9 +67,9 @@ class TrainingWorker:
         Returns:
             创建的训练任务
         """
-        # 读取文件获取记录数
+        # 读取文件获取记录数（兼容多行、引号内逗号、业务标签未引号含逗号）
         try:
-            df = pd.read_csv(file_path, encoding='utf-8')
+            df = _read_training_csv(file_path)
             total_records = len(df)
         except Exception as e:
             raise ValueError(f"无法读取文件: {e}")
@@ -89,8 +108,8 @@ class TrainingWorker:
             # 更新任务状态为处理中
             self.kb_manager.update_training_task(task_id, status='processing')
             
-            # 读取CSV文件
-            df = pd.read_csv(file_path, encoding='utf-8')
+            # 读取CSV文件（兼容多行、引号内逗号、业务标签未引号含逗号）
+            df = _read_training_csv(file_path)
             total_records = len(df)
             
             # 显示CSV列名

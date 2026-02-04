@@ -23,7 +23,21 @@ OPENROUTER_REFERER=
 OPENROUTER_APP_NAME=
 
 # === Lark Notification ===
+# 默认飞书群 Webhook（用于反馈通知）
 LARK_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/your_webhook_url
+
+# 多飞书群配置（JSON格式，支持预警群/喜报群/默认群）
+# LARK_GROUPS={"default":"webhook_url1","alert":"webhook_url2","celebration":"webhook_url3"}
+
+# 可选：飞书应用凭证，用于在「发送报告到飞书」时把图表以卡片图片形式展示（不配置则报告仍以卡片发送，图表需下载 HTML 查看）
+# LARK_APP_ID=your_app_id
+# LARK_APP_SECRET=your_app_secret
+
+# === 科大讯飞语音识别 ===
+# 获取方式：https://console.xfyun.cn/services/iat
+XUNFEI_APP_ID=your_app_id
+XUNFEI_API_KEY=your_api_key
+XUNFEI_API_SECRET=your_api_secret
 
 # === Auth Config ===
 AUTH_ENABLED=true
@@ -39,6 +53,19 @@ TENANT_COLUMN=operator_id
 
 # === Other Config ===
 SHOW_SQL_DEBUG=False
+
+# === 预警调度配置 ===
+# 是否启用预警定时检测
+ALERT_SCHEDULER_ENABLED=true
+# 检测间隔（秒）。测试智能预警时可设为30，生产环境建议3600（1小时）
+ALERT_CHECK_INTERVAL=30
+# 固定检测时间点（可选，格式：HH:MM，多个用逗号分隔）
+# ALERT_SCHEDULE_TIMES=09:00,18:00
+
+# 预警/喜报疲劳度（同一图表同类型在冷却期内不重复发送；用户可在洞察设置中覆盖）
+# ALERT_FATIGUE_ENABLED=true
+# ALERT_FATIGUE_COOLDOWN_HOURS=24
+# ALERT_FATIGUE_LOG_PATH=data/alert_sent_log.json
 
 # === RAG Optimization ===
 RAG_SQL_THRESHOLD=1.5

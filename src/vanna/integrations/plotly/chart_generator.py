@@ -23,6 +23,55 @@ class PlotlyChartGenerator:
     # Color palette for charts (excluding cream as it's too light for data)
     COLOR_PALETTE = ["#15a8a8", "#fe5d26", "#bf1363", "#023d60"]
 
+    @staticmethod
+    def _is_status_like_column(col_name: str, df: pd.DataFrame) -> bool:
+        """判断列是否像状态/编码类，不作为 Y 轴高度（避免状态码主导刻度）。"""
+        lower = (col_name or "").lower()
+        status_keywords = ("status", "code", "state", "类型", "状态", "编码")
+        value_keywords = ("count", "total", "amount", "sum", "num", "数量", "订单", "笔数", "value", "值")
+        if any(k in lower for k in value_keywords):
+            return False
+        if any(k in lower for k in status_keywords):
+            return True
+        if lower.endswith("_id") or lower.endswith("id"):
+            return True
+        # 数据特征：取值种类少且多为整数码值
+        s = df[col_name].dropna()
+        if len(s) == 0:
+            return False
+        n = pd.to_numeric(s, errors="coerce").dropna()
+        if len(n) == 0:
+            return False
+        distinct = n.astype(int).nunique()
+        lo, hi = float(n.min()), float(n.max())
+        if distinct <= 30 and (hi - lo > 1000 or (hi <= 9999 and lo >= 0)):
+            return True
+        return False
+
+    @staticmethod
+    def _is_value_metric_column(col_name: str) -> bool:
+        """判断列名是否像数值/指标类，优先作为 Y 轴。"""
+        lower = (col_name or "").lower()
+        return any(
+            k in lower
+            for k in (
+                "count", "total", "amount", "sum", "num", "数量", "订单", "笔数",
+                "value", "值", "revenue", "金额", "avg", "mean", "平均",
+            )
+        )
+
+    def _filter_value_cols_for_y(self, numeric_cols: List[str], df: pd.DataFrame) -> List[str]:
+        """从数值列中筛出用于 Y 轴的列：排除状态类，优先数值指标类。"""
+        if not numeric_cols:
+            return numeric_cols
+        value_like = [c for c in numeric_cols if self._is_value_metric_column(c)]
+        not_status = [c for c in numeric_cols if not self._is_status_like_column(c, df)]
+        if value_like:
+            return value_like
+        if not_status:
+            return not_status
+        return numeric_cols
+
     def generate_chart(self, df: pd.DataFrame, title: str = "Chart") -> Dict[str, Any]:
         """Generate a Plotly chart based on DataFrame shape and types.
 
@@ -69,35 +118,72 @@ class PlotlyChartGenerator:
                 except (ValueError, TypeError, AttributeError):
                     pass
 
-        # Heuristic: If 4 or more columns, render as a table
-        if len(df.columns) >= 4:
-            fig = self._create_table(df, title)
-            result: Dict[str, Any] = json.loads(pio.to_json(fig))
-            return result
-
-        # Identify column types
+        # Identify column types (needed for 4-col multi-line check)
         numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
         categorical_cols = df.select_dtypes(
             include=["object", "category"]
         ).columns.tolist()
         datetime_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
 
-        # Check for time series
-        is_timeseries = len(datetime_cols) > 0
+        # 时间名列（用于无 datetime64 时仍能识别时间轴）
+        time_like_col_names = [
+            c for c in df.columns
+            if any(kw in (c or "").lower() for kw in ["date", "time", "dt", "day", "month", "stat"])
+        ]
+        # 4+ 列时：若为「时间+分类+数值」结构，优先多线折线图，否则才用表格
+        if len(df.columns) >= 4 and (datetime_cols or time_like_col_names) and categorical_cols and numeric_cols:
+            time_col = datetime_cols[0] if datetime_cols else time_like_col_names[0]
+            value_cols = self._filter_value_cols_for_y(numeric_cols, df) or numeric_cols
+            val_col = value_cols[0]
+            cat_col = None
+            for preferred in ["status_desc", "provisioning_status", "status", "type", "category"]:
+                if preferred in df.columns:
+                    cat_col = preferred
+                    break
+            if not cat_col and categorical_cols:
+                cat_col = categorical_cols[0]
+            if cat_col:
+                fig = self._create_grouped_time_series_chart(
+                    df, time_col, cat_col, val_col, title
+                )
+                result = json.loads(pio.to_json(fig))
+                return result
+        if len(df.columns) >= 4:
+            fig = self._create_table(df, title)
+            result: Dict[str, Any] = json.loads(pio.to_json(fig))
+            return result
+
+        # Check for time series (including time-like column by name)
+        time_like_cols = [
+            c for c in df.columns
+            if any(kw in (c or "").lower() for kw in ["date", "time", "dt", "day", "month", "stat"])
+        ]
+        is_timeseries = len(datetime_cols) > 0 or bool(time_like_cols)
 
         # Apply heuristics
         if is_timeseries and len(numeric_cols) > 0:
-            # Time series line chart
+            # Time series line chart：Y 轴用数值列，排除状态类列
+            value_cols = self._filter_value_cols_for_y(numeric_cols, df)
+            if not value_cols:
+                value_cols = numeric_cols
+            time_col = datetime_cols[0] if datetime_cols else time_like_cols[0]
             if len(categorical_cols) > 0 and len(numeric_cols) == 1:
                 # Case: Long format time series (Date, Category, Value)
                 # e.g. stat_date, measure_type, daily_count
                 fig = self._create_grouped_time_series_chart(
-                    df, datetime_cols[0], categorical_cols[0], numeric_cols[0], title
+                    df, time_col, categorical_cols[0], numeric_cols[0], title
+                )
+            elif len(categorical_cols) > 0:
+                # 有分类列时优先多线图（每种类型/状态一条线）
+                val_col = value_cols[0] if value_cols else numeric_cols[0]
+                cat_col = categorical_cols[0]
+                fig = self._create_grouped_time_series_chart(
+                    df, time_col, cat_col, val_col, title
                 )
             else:
                 # Case: Wide format time series (Date, Value1, Value2...)
                 fig = self._create_time_series_chart(
-                    df, datetime_cols[0], numeric_cols, title
+                    df, time_col, value_cols, title
                 )
         elif len(numeric_cols) == 1 and len(categorical_cols) == 0:
             # Single numeric column: histogram
@@ -108,21 +194,21 @@ class PlotlyChartGenerator:
                 df, categorical_cols[0], numeric_cols[0], title
             )
         elif len(numeric_cols) == 2 and len(categorical_cols) >= 1:
-            # Two numeric columns + categorical: grouped line chart
-            # Heuristic: Identify X axis (date/id) vs Y axis (value)
+            # Two numeric columns + categorical: Y 轴优先用数值列，不用状态列
             col1, col2 = numeric_cols[0], numeric_cols[1]
-
-            # Check if col1 looks like a date/id
             col1_is_x = any(x in col1.lower() for x in ['date', 'time', 'year', 'id', 'day', 'month'])
             col2_is_x = any(x in col2.lower() for x in ['date', 'time', 'year', 'id', 'day', 'month'])
-
             if col1_is_x and not col2_is_x:
                 x_col, y_col = col1, col2
             elif col2_is_x and not col1_is_x:
                 x_col, y_col = col2, col1
             else:
-                # Default to first as X
                 x_col, y_col = col1, col2
+            # 若当前 y 像状态列而另一列为数值列，则用数值列作 Y
+            if self._is_status_like_column(y_col, df) and self._is_value_metric_column(x_col):
+                x_col, y_col = y_col, x_col
+            elif self._is_status_like_column(y_col, df) and not self._is_status_like_column(x_col, df):
+                x_col, y_col = y_col, x_col
 
             fig = self._create_grouped_time_series_chart(
                 df, x_col, categorical_cols[0], y_col, title
@@ -265,11 +351,18 @@ class PlotlyChartGenerator:
             title=title,
             color_discrete_sequence=self.COLOR_PALETTE,
         )
-        fig.update_layout(
+        fig.update_traces(line=dict(shape="spline"))
+        layout_kw: Dict[str, Any] = dict(
             xaxis_title=time_col,
             yaxis_title=val_col,
             hovermode="x unified",
         )
+        if len(df) > 24:
+            layout_kw["xaxis"] = dict(
+                rangeslider=dict(visible=True, thickness=0.06, bgcolor="rgba(21, 168, 168, 0.08)"),
+                type="date",
+            )
+        fig.update_layout(**layout_kw)
         self._apply_standard_layout(fig)
         return fig
 
@@ -287,16 +380,22 @@ class PlotlyChartGenerator:
                     y=df[col],
                     mode="lines",
                     name=col,
-                    line=dict(color=color),
+                    line=dict(color=color, shape="spline"),
                 )
             )
 
-        fig.update_layout(
+        layout_kw: Dict[str, Any] = dict(
             title=title,
             xaxis_title=time_col,
             yaxis_title="Value",
             hovermode="x unified",
         )
+        if len(df) > 24:
+            layout_kw["xaxis"] = dict(
+                rangeslider=dict(visible=True, thickness=0.06, bgcolor="rgba(21, 168, 168, 0.08)"),
+                type="date",
+            )
+        fig.update_layout(**layout_kw)
         self._apply_standard_layout(fig)
         return fig
 

@@ -980,7 +980,10 @@
                             </div>
                         </div>
                         <div class="input-group">
-                            <input type="text" id="questionInput" class="form-control" placeholder="Ask a question about your data..." onkeypress="if(event.key==='Enter') ask()">
+                            <input type="text" id="questionInput" class="form-control" placeholder="输入问题或点击麦克风语音输入..." onkeypress="if(event.key==='Enter') ask()">
+                            <button class="btn btn-voice" onclick="toggleVoiceRecording()" title="语音输入" id="voiceBtn" style="width:40px;height:40px;border-radius:12px;background:var(--vanna-bg);border:1px solid var(--vanna-border);margin-right:6px;">
+                                <i class="bi bi-mic" id="voiceIcon"></i>
+                            </button>
                             <button class="btn btn-send" onclick="ask()"><i class="bi bi-send-fill"></i></button>
                         </div>
                     </div>
@@ -1029,6 +1032,9 @@
                     <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
                         <span>我的看板</span>
                         <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-warning" onclick="checkAlertsAndCelebrations()" title="检测预警/喜报" id="checkAlertsBtn">
+                                <i class="bi bi-bell"></i> 检测预警
+                            </button>
                             <button class="btn btn-sm btn-outline-primary" onclick="generateInsightReport()" title="生成AI洞察报告" id="generateReportBtn">
                                 <i class="bi bi-file-earmark-text"></i> AI洞察报告
                             </button>
@@ -1613,6 +1619,19 @@
                                 <small class="text-muted d-block">自动分析数据并生成智能洞察建议</small>
                             </label>
                         </div>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="settingAlertFatigueEnabled">
+                            <label class="form-check-label" for="settingAlertFatigueEnabled">
+                                启用预警/喜报疲劳度
+                                <small class="text-muted d-block">同一图表同类型在冷却期内不重复发送</small>
+                            </label>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label small">全局冷却时间（小时）</label>
+                                <input type="number" class="form-control form-control-sm" id="settingAlertFatigueCooldownHours" value="24" min="0" max="720" step="0.5" placeholder="24">
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer border-top-0 d-flex justify-content-between">
@@ -1657,7 +1676,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer border-top-0">
+                <div class="modal-footer border-top-0 flex-wrap gap-2">
                     <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">关闭</button>
                     <button type="button" class="btn btn-success rounded-pill px-4" onclick="downloadReport('md')" id="downloadMdBtn" disabled>
                         <i class="bi bi-markdown me-1"></i>下载 Markdown
@@ -1665,6 +1684,14 @@
                     <button type="button" class="btn btn-primary rounded-pill px-4" style="background: var(--vanna-teal); border: none;" onclick="downloadReport('html')" id="downloadHtmlBtn" disabled>
                         <i class="bi bi-filetype-html me-1"></i>下载 HTML
                     </button>
+                    <div class="dropdown">
+                        <button type="button" class="btn btn-info rounded-pill px-4 dropdown-toggle" id="sendToLarkDropdown" data-bs-toggle="dropdown" disabled>
+                            <i class="bi bi-send me-1"></i>发送飞书
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" id="larkGroupDropdownMenu">
+                            <li><span class="dropdown-item-text text-muted small">加载中...</span></li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1739,7 +1766,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        let APP_CONFIG = { show_sql: false };
+        let APP_CONFIG = { show_sql: false, speech_enabled: false };
         let CHAT_HISTORY = {};
         let CHART_INSTANCES = {};
         let PINNED_ITEMS = {};
@@ -1781,6 +1808,12 @@
                 const res = await fetch('/api/v0/config');
                 APP_CONFIG = await res.json();
             } catch (e) { console.error("Config error", e); }
+
+            // 根据配置控制语音按钮显示
+            const voiceBtn = document.getElementById('voiceBtn');
+            if (voiceBtn) {
+                voiceBtn.style.display = APP_CONFIG.speech_enabled ? 'block' : 'none';
+            }
 
             const authenticated = await ensureAuthenticated();
             if (!authenticated) return;
@@ -2094,6 +2127,8 @@
             document.getElementById('settingDedupThreshold').value = USER_SETTINGS.dedup_threshold || 0.7;
             document.getElementById('settingDedupMode').value = USER_SETTINGS.dedup_mode || 'rule';
             document.getElementById('settingInsightEnabled').checked = USER_SETTINGS.insight_enabled !== false;
+            document.getElementById('settingAlertFatigueEnabled').checked = USER_SETTINGS.alert_fatigue_enabled !== false;
+            document.getElementById('settingAlertFatigueCooldownHours').value = USER_SETTINGS.alert_fatigue_cooldown_hours != null ? USER_SETTINGS.alert_fatigue_cooldown_hours : 24;
             settingsModal.show();
         }
 
@@ -2108,6 +2143,8 @@
                 dedup_threshold: parseFloat(document.getElementById('settingDedupThreshold').value),
                 dedup_mode: document.getElementById('settingDedupMode').value,
                 insight_enabled: document.getElementById('settingInsightEnabled').checked,
+                alert_fatigue_enabled: document.getElementById('settingAlertFatigueEnabled').checked,
+                alert_fatigue_cooldown_hours: parseFloat(document.getElementById('settingAlertFatigueCooldownHours').value) || 24,
             };
             try {
                 const res = await authFetch('/api/v0/settings', {
@@ -2192,6 +2229,20 @@
             }
         }
 
+        // 标签徽章HTML生成（需要在loadPinnedCharts之前定义）
+        function getLabelBadgeHtml(label) {
+            if (!label || !label.type) return '';
+            const LABEL_CATS = {
+                alert: { name: '预警类', color: '#ef4444', categories: { inventory: '库存', cost: '成本', risk: '风险' } },
+                celebration: { name: '喜报类', color: '#22c55e', categories: { gmv: '销售额', growth: '增长', performance: '业绩' } }
+            };
+            const typeConfig = LABEL_CATS[label.type];
+            if (!typeConfig) return '';
+            const catName = typeConfig.categories[label.category] || label.category;
+            const aiTag = label.ai_suggested ? '✨' : '';
+            return `<span class="badge" style="background:${typeConfig.color};font-size:10px;margin-right:4px;" title="${typeConfig.name}">${catName}${aiTag}</span>`;
+        }
+
         async function loadPinnedCharts() {
             const container = document.getElementById('pinnedGrid');
             container.innerHTML = '<div class="pinned-placeholder">加载中...</div>';
@@ -2207,11 +2258,18 @@
                     container.innerHTML = '<div class="pinned-placeholder">从对话中点击 📌 Pin，即可加入看板</div>';
                     return;
                 }
-                container.innerHTML = items.map(item => `
-                    <div class="pinned-card" data-pinned-item='${JSON.stringify({message_id: item.message_id, question: item.question, result: item.result, columns: item.columns, chart: item.chart}).replace(/'/g, "&#39;")}'>
+                container.innerHTML = items.map(item => {
+                    const label = item.label;
+                    const labelBadge = label ? getLabelBadgeHtml(label) : '';
+                    return `
+                    <div class="pinned-card" data-pinned-item='${JSON.stringify({message_id: item.message_id, question: item.question, result: item.result, columns: item.columns, chart: item.chart, label: item.label}).replace(/'/g, "&#39;")}'>
                         <div class="pinned-card-header">
                             <span title="${item.question || '收藏图表'}">${item.question || '收藏图表'}</span>
                             <div class="pinned-card-actions">
+                                ${labelBadge}
+                                <button class="btn btn-sm btn-outline-secondary" onclick="showLabelEditor('${item.message_id}')" title="编辑标签">
+                                    <i class="bi bi-tag"></i>
+                                </button>
                                 <button class="btn btn-sm btn-outline-secondary" onclick="openChartFullscreen('${item.message_id}')" title="全屏查看">
                                     <i class="bi bi-arrows-fullscreen"></i>
                                 </button>
@@ -2226,7 +2284,7 @@
                         <div id="pinned-chart-${item.message_id}" class="pinned-chart"></div>
                         <div class="text-muted small mt-2">刷新于 ${item.last_refreshed || '--'}</div>
                     </div>
-                `).join('');
+                `}).join('');
 
                 items.forEach(item => {
                     const chartContainer = document.getElementById(`pinned-chart-${item.message_id}`);
@@ -2708,6 +2766,13 @@
                     
                     downloadMdBtn.disabled = false;
                     downloadHtmlBtn.disabled = false;
+                    
+                    // 启用发送飞书按钮并加载群列表
+                    const sendToLarkBtn = document.getElementById('sendToLarkDropdown');
+                    if (sendToLarkBtn) {
+                        sendToLarkBtn.disabled = false;
+                        loadLarkGroupsToDropdown();
+                    }
                 } else {
                     reportContent.innerHTML = `
                         <div class="text-center p-5 text-danger">
@@ -2740,6 +2805,8 @@
             // 按四级标题分割报告（#### 代表具体分析小节）
             const sections = markdown.split(/\n(?=#{3,4}\s)/);
             let resultHtml = '';
+            // 按顺序兜底：第 1 个 #### 小节对应图 1，第 2 个对应图 2…
+            let nextChartByOrder = 0;
             
             // 定义关键词到图表的映射
             const keywordMatchers = [
@@ -2753,16 +2820,16 @@
             for (let i = 0; i < sections.length; i++) {
                 const section = sections[i];
                 const sectionLower = section.toLowerCase();
+                const firstLine = section.split('\n')[0] || '';
                 
                 // 转换当前段落为HTML
                 let sectionHtml = renderMarkdownToHtml(section);
                 
-                // 1. 首先尝试通过"图表N"引用匹配
-                const chartRefs = [...section.matchAll(/\*{0,2}图表\s*(\d+)/gi)];
-                const chartNums = [...new Set(chartRefs.map(m => parseInt(m[1])))];
-                
                 let matchedInSection = false;
-                for (const chartNum of chartNums) {
+                // 1. 优先通过小节标题「#### 图表N: xxx」匹配（与后端 AI 约定格式一致）
+                const headingMatch = firstLine.match(/^#{3,4}\s*图表\s*(\d+)\s*[:：]/i);
+                if (headingMatch) {
+                    const chartNum = parseInt(headingMatch[1]);
                     if (chartNum > 0 && chartNum <= chartImages.length) {
                         const matchedChart = chartImages[chartNum - 1];
                         if (!matchedChart._matched) {
@@ -2772,8 +2839,22 @@
                         }
                     }
                 }
-                
-                // 2. 如果没有通过引用匹配，尝试通过关键词匹配
+                // 2. 通过正文中「图表N」引用匹配
+                if (!matchedInSection) {
+                    const chartRefs = [...section.matchAll(/\*{0,2}图表\s*(\d+)/gi)];
+                    const chartNums = [...new Set(chartRefs.map(m => parseInt(m[1])))];
+                    for (const chartNum of chartNums) {
+                        if (chartNum > 0 && chartNum <= chartImages.length) {
+                            const matchedChart = chartImages[chartNum - 1];
+                            if (!matchedChart._matched) {
+                                matchedChart._matched = true;
+                                matchedInSection = true;
+                                sectionHtml += createChartHtml(matchedChart, chartNum);
+                            }
+                        }
+                    }
+                }
+                // 3. 若仍未匹配，尝试通过关键词匹配
                 if (!matchedInSection && section.match(/^#{3,4}\s+\d+\.\d+/)) {
                     for (const matcher of keywordMatchers) {
                         if (matcher.chartIndex < chartImages.length) {
@@ -2782,11 +2863,23 @@
                                 const hasMatch = matcher.keywords.some(kw => sectionLower.includes(kw.toLowerCase()));
                                 if (hasMatch) {
                                     matchedChart._matched = true;
+                                    matchedInSection = true;
                                     sectionHtml += createChartHtml(matchedChart, matcher.chartIndex + 1);
                                     break;
                                 }
                             }
                         }
+                    }
+                }
+                // 4. 兜底：本节是「核心指标」类小节（#### 数字. 或 #### 图表N）且尚未匹配时，按顺序分配
+                const isChartLikeHeading = /^#{3,4}\s*(?:图表\s*)?\d+[\s\.:：]/.test(firstLine.trim());
+                if (!matchedInSection && isChartLikeHeading) {
+                    while (nextChartByOrder < chartImages.length && chartImages[nextChartByOrder]._matched) nextChartByOrder++;
+                    if (nextChartByOrder < chartImages.length) {
+                        const matchedChart = chartImages[nextChartByOrder];
+                        matchedChart._matched = true;
+                        sectionHtml += createChartHtml(matchedChart, nextChartByOrder + 1);
+                        nextChartByOrder++;
                     }
                 }
                 
@@ -2820,6 +2913,7 @@
             // 按四级标题分割报告
             const sections = markdown.split(/\n(?=#{3,4}\s)/);
             let resultHtml = '';
+            let nextChartByOrder = 0;
             
             // 定义关键词到图表的映射
             const keywordMatchers = [
@@ -2833,16 +2927,16 @@
             for (let i = 0; i < sections.length; i++) {
                 const section = sections[i];
                 const sectionLower = section.toLowerCase();
+                const firstLine = section.split('\n')[0] || '';
                 
                 // 转换当前段落为HTML
                 let sectionHtml = renderMarkdownToHtmlForExport(section);
                 
-                // 1. 首先尝试通过"图表N"引用匹配
-                const chartRefs = [...section.matchAll(/\*{0,2}图表\s*(\d+)/gi)];
-                const chartNums = [...new Set(chartRefs.map(m => parseInt(m[1])))];
-                
                 let matchedInSection = false;
-                for (const chartNum of chartNums) {
+                // 1. 优先通过小节标题「#### 图表N: xxx」匹配
+                const headingMatch = firstLine.match(/^#{3,4}\s*图表\s*(\d+)\s*[:：]/i);
+                if (headingMatch) {
+                    const chartNum = parseInt(headingMatch[1]);
                     if (chartNum > 0 && chartNum <= chartImages.length) {
                         const matchedChart = chartImages[chartNum - 1];
                         if (!matchedChart._matched) {
@@ -2857,8 +2951,27 @@
                         }
                     }
                 }
-                
-                // 2. 如果没有通过引用匹配，尝试通过关键词匹配
+                // 2. 通过正文中「图表N」引用匹配
+                if (!matchedInSection) {
+                    const chartRefs = [...section.matchAll(/\*{0,2}图表\s*(\d+)/gi)];
+                    const chartNums = [...new Set(chartRefs.map(m => parseInt(m[1])))];
+                    for (const chartNum of chartNums) {
+                        if (chartNum > 0 && chartNum <= chartImages.length) {
+                            const matchedChart = chartImages[chartNum - 1];
+                            if (!matchedChart._matched) {
+                                matchedChart._matched = true;
+                                matchedInSection = true;
+                                sectionHtml += `
+                                    <div class="chart-container">
+                                        <div class="chart-title">图表${chartNum}: ${matchedChart.title}</div>
+                                        <img class="chart-img" src="${matchedChart.dataUrl}" alt="${matchedChart.title}">
+                                    </div>
+                                `;
+                            }
+                        }
+                    }
+                }
+                // 3. 若仍未匹配，尝试通过关键词匹配
                 if (!matchedInSection && section.match(/^#{3,4}\s+\d+\.\d+/)) {
                     for (const matcher of keywordMatchers) {
                         if (matcher.chartIndex < chartImages.length) {
@@ -2867,6 +2980,7 @@
                                 const hasMatch = matcher.keywords.some(kw => sectionLower.includes(kw.toLowerCase()));
                                 if (hasMatch) {
                                     matchedChart._matched = true;
+                                    matchedInSection = true;
                                     sectionHtml += `
                                         <div class="chart-container">
                                             <div class="chart-title">图表${matcher.chartIndex + 1}: ${matchedChart.title}</div>
@@ -2877,6 +2991,22 @@
                                 }
                             }
                         }
+                    }
+                }
+                // 4. 兜底：本节是「核心指标」类小节（#### 数字. 或 #### 图表N）且尚未匹配时，按顺序分配
+                const isChartLikeHeading = /^#{3,4}\s*(?:图表\s*)?\d+[\s\.:：]/.test(firstLine.trim());
+                if (!matchedInSection && isChartLikeHeading) {
+                    while (nextChartByOrder < chartImages.length && chartImages[nextChartByOrder]._matched) nextChartByOrder++;
+                    if (nextChartByOrder < chartImages.length) {
+                        const matchedChart = chartImages[nextChartByOrder];
+                        matchedChart._matched = true;
+                        sectionHtml += `
+                            <div class="chart-container">
+                                <div class="chart-title">图表${nextChartByOrder + 1}: ${matchedChart.title}</div>
+                                <img class="chart-img" src="${matchedChart.dataUrl}" alt="${matchedChart.title}">
+                            </div>
+                        `;
+                        nextChartByOrder++;
                     }
                 }
                 
@@ -3615,6 +3745,8 @@
             const chartType = detectChartType(resultData, columns, columnTypes, intent);
             const xColumn = columns[0];
             let yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
+            yColumns = filterYColumnsForChart(resultData, yColumns);
+            if (yColumns.length === 0) yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
             if (yColumns.length === 0) yColumns = columns.slice(1);
 
             const formatXAxisValue = (val) => {
@@ -3636,14 +3768,18 @@
                         [longFormat.categoryCol]: String(row[longFormat.categoryCol]),
                         [longFormat.valueCol]: Number(row[longFormat.valueCol]) || 0
                     }));
-                    chart = new G2Plot.Line(container, {
+                    const lineOpt = {
                         data,
                         xField: longFormat.dateCol,
                         yField: longFormat.valueCol,
                         seriesField: longFormat.categoryCol,
                         smooth: true,
                         legend: { position: 'top' }
-                    });
+                    };
+                    if (data.length > DATA_ZOOM_THRESHOLD) {
+                        lineOpt.slider = { start: 0, end: DATA_ZOOM_DEFAULT_END / 100 };
+                    }
+                    chart = new G2Plot.Line(container, lineOpt);
                 }
             } else if (chartType === 'pie') {
                 const valueCol = yColumns[0];
@@ -3674,9 +3810,14 @@
                         x: item.x,
                         y: Number(item.row[yCol]) || 0
                     }));
+                    const lineOpt = { data, xField: 'x', yField: 'y', smooth: true };
+                    const colOpt = { data, xField: 'x', yField: 'y' };
+                    if (data.length > DATA_ZOOM_THRESHOLD && isLine) {
+                        lineOpt.slider = { start: 0, end: DATA_ZOOM_DEFAULT_END / 100 };
+                    }
                     chart = isLine
-                        ? new G2Plot.Line(container, { data, xField: 'x', yField: 'y', smooth: true })
-                        : new G2Plot.Column(container, { data, xField: 'x', yField: 'y' });
+                        ? new G2Plot.Line(container, lineOpt)
+                        : new G2Plot.Column(container, colOpt);
                 } else {
                     yColumns.forEach(yCol => {
                         baseData.forEach(item => {
@@ -3687,9 +3828,14 @@
                             });
                         });
                     });
+                    const lineOpt = { data, xField: 'x', yField: 'y', seriesField: 'series', smooth: true };
+                    const colOpt = { data, xField: 'x', yField: 'y', seriesField: 'series', isGroup: true };
+                    if (data.length > DATA_ZOOM_THRESHOLD && isLine) {
+                        lineOpt.slider = { start: 0, end: DATA_ZOOM_DEFAULT_END / 100 };
+                    }
                     chart = isLine
-                        ? new G2Plot.Line(container, { data, xField: 'x', yField: 'y', seriesField: 'series', smooth: true })
-                        : new G2Plot.Column(container, { data, xField: 'x', yField: 'y', seriesField: 'series', isGroup: true });
+                        ? new G2Plot.Line(container, lineOpt)
+                        : new G2Plot.Column(container, colOpt);
                 }
             }
 
@@ -3782,6 +3928,39 @@
             return columnTypes;
         }
 
+        /** 判断列名是否像“状态/编码”类（不作为 Y 轴高度，避免状态码主导刻度） */
+        function isStatusLikeColumnName(colName) {
+            const lower = (colName || '').toLowerCase();
+            return /status|code|state|类型|状态|编码|id$|_id$/.test(lower) && !/count|total|amount|sum|num|数量|订单|笔数|value|值/.test(lower);
+        }
+        /** 判断列名是否像“数值/指标”类（优先作为 Y 轴） */
+        function isValueMetricColumnName(colName) {
+            const lower = (colName || '').toLowerCase();
+            return /count|total|amount|sum|num|数量|订单|笔数|value|值|revenue|金额|avg|mean|平均/.test(lower);
+        }
+        /** 根据数据特征判断是否像状态码列：取值种类少且多为整数码值 */
+        function isStatusLikeColumnData(resultData, col) {
+            const vals = resultData.map(row => row[col]).filter(v => v !== null && v !== undefined && v !== '');
+            const nums = vals.map(v => Number(v)).filter(n => !isNaN(n));
+            if (nums.length === 0) return false;
+            const distinct = new Set(nums.map(n => Math.round(n))).size;
+            const max = Math.max(...nums), min = Math.min(...nums);
+            return distinct <= 30 && (max - min > 1000 || (max <= 9999 && min >= 0));
+        }
+        /** 从数值列中筛出用于 Y 轴的列：排除状态类，优先数值指标类 */
+        function filterYColumnsForChart(resultData, numericYColumns) {
+            if (!numericYColumns || numericYColumns.length === 0) return numericYColumns;
+            const valueLike = numericYColumns.filter(col => isValueMetricColumnName(col));
+            const notStatusLike = numericYColumns.filter(col => {
+                if (isStatusLikeColumnName(col)) return false;
+                if (isStatusLikeColumnData(resultData, col)) return false;
+                return true;
+            });
+            if (valueLike.length > 0) return valueLike;
+            if (notStatusLike.length > 0) return notStatusLike;
+            return numericYColumns;
+        }
+
         function detectChartType(resultData, columns, columnTypes = null, intent = null) {
             const xColumn = columns[0];
             if (!columnTypes) columnTypes = detectColumnTypes(resultData, columns);
@@ -3793,6 +3972,7 @@
             }
             if (intent && intent.preferred_chart === 'pie') return 'pie';
             if (intent && intent.preferred_chart === 'bar') return 'bar';
+            if (intent && intent.preferred_chart === 'scatter') return 'scatter';
             if (longFormat) return 'line-long-format';
             const columnNames = columns.join(' ').toLowerCase();
             if (columnNames.match(/trend|趋势|time|时间|date|日期|month|月|year|年|day|天|hour|小时/)) {
@@ -3800,6 +3980,9 @@
                 if (firstVal && (firstVal.toString().match(/\d{4}[-/]\d{1,2}[-/]\d{1,2}/) || firstVal.toString().match(/\d{4}[-/]\d{1,2}/) || firstVal.toString().match(/\d{8}/))) return 'line';
             }
             if (columnNames.match(/percent|百分比|占比|比例|rate|率|proportion|份额|distribution|分布/) && yColumns.length === 1 && resultData.length <= 10) return 'pie';
+            // 放宽：结果含占比/百分比列且有描述列（如 status_name）且行数少 → 饼图（允许多个数值列）
+            const hasLabelLikeCol = columns.some(c => /status_name|name|类型|类别|desc|描述|名称|_name/i.test(c || ''));
+            if (columnNames.match(/percent|百分比|占比|比例|rate|率|proportion|份额|distribution|分布/) && hasLabelLikeCol && resultData.length <= 15) return 'pie';
             if (yColumns.length === 1) {
                 const yData = resultData.map(row => Number(row[yColumns[0]]) || 0);
                 const total = yData.reduce((a, b) => a + b, 0);
@@ -3808,6 +3991,38 @@
             }
             if (yColumns.length > 1 && resultData.length > 5) return 'line';
             return 'bar';
+        }
+
+        /** 统一解析图表用列：优先使用 intent 的列提示，否则按列名/类型启发式 */
+        function resolveChartColumns(resultData, columns, columnTypes, intent, chartType) {
+            const valid = (col) => col && columns.includes(col);
+            let xColumn = columns[0];
+            let yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
+            yColumns = filterYColumnsForChart(resultData, yColumns);
+            if (yColumns.length === 0) yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
+            if (yColumns.length === 0) yColumns = columns.slice(1);
+            if (intent) {
+                if (chartType === 'line' && valid(intent.chart_x_col)) {
+                    xColumn = intent.chart_x_col;
+                    if (intent.chart_value_cols && Array.isArray(intent.chart_value_cols))
+                        yColumns = intent.chart_value_cols.filter(valid);
+                    else if (valid(intent.chart_value_col))
+                        yColumns = [intent.chart_value_col];
+                }
+                if (chartType === 'bar' && valid(intent.chart_label_col)) {
+                    xColumn = intent.chart_label_col;
+                    if (intent.chart_value_cols && Array.isArray(intent.chart_value_cols))
+                        yColumns = intent.chart_value_cols.filter(valid);
+                    else if (valid(intent.chart_value_col))
+                        yColumns = [intent.chart_value_col];
+                }
+                if (chartType === 'scatter' && valid(intent.chart_x_col) && valid(intent.chart_y_col)) {
+                    xColumn = intent.chart_x_col;
+                    yColumns = [intent.chart_y_col];
+                }
+            }
+            if (yColumns.length === 0) yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric') || columns.slice(1);
+            return { xColumn, yColumns };
         }
 
         function smartGenerateChart(resultData, columns, intent = null) {
@@ -3825,19 +4040,38 @@
                     return generateLineChart(formattedData, transformed.columns, transformed.columns[0], transformed.columns.slice(1), formattedData.map(row => row[transformed.columns[0]]));
                 }
             }
-            const xColumn = columns[0];
-            let yColumns = columns.slice(1).filter(col => columnTypes[col] === 'numeric');
-            if (yColumns.length === 0) yColumns = columns.slice(1);
+            const { xColumn, yColumns } = resolveChartColumns(resultData, columns, columnTypes, intent, chartType);
             const xAxisData = resultData.map(row => {
                 let val = row[xColumn];
                 if (val && val.toString().match(/^\d{8}$/)) val = formatDate(val);
                 if (val && typeof val === 'string' && val.length > 20) return val.substring(0, 20) + '...';
                 return val !== null ? String(val) : '';
             });
-            if (chartType === 'pie') return generatePieChart(resultData, columns, xColumn, yColumns);
-            else if (chartType === 'line') return generateLineChart(resultData, columns, xColumn, yColumns, xAxisData);
-            else return generateBarChart(resultData, columns, xColumn, yColumns, xAxisData);
+            if (chartType === 'pie') {
+                let pieLabelCol = (intent && intent.chart_label_col && columns.includes(intent.chart_label_col)) ? intent.chart_label_col : null;
+                let pieValueCol = (intent && intent.chart_value_col && columns.includes(intent.chart_value_col)) ? intent.chart_value_col : null;
+                if (!pieLabelCol) {
+                    pieLabelCol = columns.find(c => /status_name|name|类型|类别|desc|描述|名称|_name/i.test(c || '')) || columns[0];
+                }
+                if (!pieValueCol) {
+                    pieValueCol = columns.find(c => /percentage|percent|占比|比例|率|份额/i.test(c || ''))
+                        || columns.find(c => /status_count|count|cnt|数量|笔数/i.test(c || ''))
+                        || (yColumns.length > 0 ? yColumns[0] : columns[1]);
+                }
+                if (!columns.includes(pieValueCol)) pieValueCol = yColumns[0] || columns[1];
+                return generatePieChart(resultData, columns, pieLabelCol, [pieValueCol]);
+            }
+            if (chartType === 'line') return generateLineChart(resultData, columns, xColumn, yColumns, xAxisData);
+            if (chartType === 'bar') return generateBarChart(resultData, columns, xColumn, yColumns, xAxisData);
+            if (chartType === 'scatter') {
+                const scatterYCol = yColumns[0] || columns.find(c => columnTypes[c] === 'numeric') || columns[1];
+                return generateScatterChart(resultData, columns, xColumn, scatterYCol);
+            }
+            return generateBarChart(resultData, columns, xColumn, yColumns, xAxisData);
         }
+
+        const DATA_ZOOM_THRESHOLD = 24;  // 超过该点数时显示横向滑动轴
+        const DATA_ZOOM_DEFAULT_END = 28; // 滑块默认显示的时间范围占比（%）
 
         function generateBarChart(resultData, columns, xColumn, yColumns, xAxisData) {
             const series = yColumns.map((col, idx) => {
@@ -3850,15 +4084,25 @@
                     label: { show: resultData.length < 20, position: 'top', color: '#64748b', fontSize: 11 }
                 };
             });
-            return {
+            const useSlider = xAxisData.length > DATA_ZOOM_THRESHOLD;
+            const gridBottom = useSlider ? '130px' : '100px';
+            const opt = {
                 backgroundColor: 'transparent',
                 tooltip: { trigger: 'axis', backgroundColor: 'rgba(30, 41, 59, 0.95)', textStyle: { color: '#fff' } },
-                grid: { left: '80px', right: '40px', top: '60px', bottom: '100px', containLabel: true },
+                grid: { left: '80px', right: '40px', top: '60px', bottom: gridBottom, containLabel: true },
                 xAxis: { type: 'category', data: xAxisData, axisLabel: { color: '#64748b', rotate: resultData.length > 10 ? 45 : 0 } },
                 yAxis: { type: 'value', axisLabel: { color: '#64748b' }, splitLine: { lineStyle: { type: 'dashed' } } },
                 series: series,
                 legend: { show: yColumns.length > 1, top: 10 }
             };
+            if (useSlider) {
+                opt.dataZoom = [{
+                    type: 'slider', xAxisIndex: 0, start: 0, end: Math.min(DATA_ZOOM_DEFAULT_END, 100) / 100,
+                    height: 22, bottom: 8, borderColor: 'transparent', fillerColor: 'rgba(21, 168, 168, 0.2)',
+                    handleStyle: { color: '#15a8a8' }, textStyle: { color: '#64748b', fontSize: 11 }, moveHandleSize: 6
+                }];
+            }
+            return opt;
         }
 
         function generateLineChart(resultData, columns, xColumn, yColumns, xAxisData) {
@@ -3867,19 +4111,37 @@
                  const data = resultData.map(row => row[col] !== null ? Number(row[col]) : 0);
                  const color = techColors[idx % techColors.length];
                  return {
-                     name: col, type: 'line', data: data, smooth: true,
-                     itemStyle: { color: color }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: color + '40' }, { offset: 1, color: color + '08' }]) }
+                     name: col, type: 'line', data: data, smooth: 0.4,
+                     itemStyle: { color: color }, lineStyle: { width: 2 }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: color + '40' }, { offset: 1, color: color + '08' }]) }
                  };
              });
-             return {
+             const useSlider = xAxisData.length > DATA_ZOOM_THRESHOLD;
+             const gridBottom = useSlider ? '130px' : '100px';
+             const opt = {
                  backgroundColor: 'transparent',
                  tooltip: { trigger: 'axis', backgroundColor: 'rgba(30, 41, 59, 0.95)', textStyle: { color: '#fff' } },
-                 grid: { left: '80px', right: '40px', top: '60px', bottom: '100px', containLabel: true },
+                 grid: { left: '80px', right: '40px', top: '60px', bottom: gridBottom, containLabel: true },
                  xAxis: { type: 'category', data: xAxisData, boundaryGap: false, axisLabel: { color: '#64748b', rotate: resultData.length > 15 ? 45 : 0 } },
                  yAxis: { type: 'value', axisLabel: { color: '#64748b' }, splitLine: { lineStyle: { type: 'dashed' } } },
                  series: series,
                  legend: { show: yColumns.length > 1, top: 10 }
              };
+             if (useSlider) {
+                 opt.dataZoom = [{
+                     type: 'slider',
+                     xAxisIndex: 0,
+                     start: 0,
+                     end: Math.min(DATA_ZOOM_DEFAULT_END, 100) / 100,
+                     height: 22,
+                     bottom: 8,
+                     borderColor: 'transparent',
+                     fillerColor: 'rgba(21, 168, 168, 0.2)',
+                     handleStyle: { color: '#15a8a8' },
+                     textStyle: { color: '#64748b', fontSize: 11 },
+                     moveHandleSize: 6
+                 }];
+             }
+             return opt;
         }
 
         function generatePieChart(resultData, columns, xColumn, yColumns) {
@@ -3896,6 +4158,18 @@
                     label: { show: true, formatter: '{d}%' }
                 }],
                 legend: { show: true, orient: 'vertical', right: 20, top: 'center' }
+            };
+        }
+
+        function generateScatterChart(resultData, columns, xColumn, yColumn) {
+            const scatterData = resultData.map(row => [Number(row[xColumn]) || 0, Number(row[yColumn]) || 0]);
+            return {
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'item', formatter: function(params) { return (xColumn + ': ' + params.value[0] + '<br/>' + yColumn + ': ' + params.value[1]); } },
+                grid: { left: '80px', right: '40px', top: '60px', bottom: '80px', containLabel: true },
+                xAxis: { type: 'value', name: xColumn, axisLabel: { color: '#64748b' }, nameTextStyle: { color: '#64748b' } },
+                yAxis: { type: 'value', name: yColumn, axisLabel: { color: '#64748b' }, nameTextStyle: { color: '#64748b' }, splitLine: { lineStyle: { type: 'dashed' } } },
+                series: [{ type: 'scatter', data: scatterData, symbolSize: 10, itemStyle: { color: '#15a8a8' }, emphasis: { scale: 1.2 } }]
             };
         }
         
@@ -5726,6 +6000,638 @@
             
             statusText.textContent = '训练超时，请查看知识库状态';
         }
+
+        // ============ 标签显示与编辑功能 ============
+        const LABEL_CATEGORIES = {
+            alert: {
+                name: '预警类',
+                color: '#ef4444',
+                categories: {
+                    inventory: { name: '库存预警', icon: 'bi-box' },
+                    cost: { name: '成本预警', icon: 'bi-currency-dollar' },
+                    risk: { name: '风险预警', icon: 'bi-exclamation-triangle' }
+                }
+            },
+            celebration: {
+                name: '喜报类',
+                color: '#22c55e',
+                categories: {
+                    gmv: { name: '销售额', icon: 'bi-graph-up-arrow' },
+                    growth: { name: '业务增长', icon: 'bi-arrow-up-circle' },
+                    performance: { name: '业绩达成', icon: 'bi-trophy' }
+                }
+            }
+        };
+
+        function showLabelEditor(messageId) {
+            const currentCard = document.querySelector(`[data-pinned-item*='"message_id":"${messageId}"']`);
+            let currentLabel = null;
+            if (currentCard) {
+                try {
+                    const itemData = JSON.parse(currentCard.getAttribute('data-pinned-item').replace(/&#39;/g, "'"));
+                    currentLabel = itemData.label;
+                } catch (e) {}
+            }
+            // 先立即用当前标签渲染弹框，再异步拉取 AI 推荐并更新提示（不阻塞打开）
+            const labelToShow = currentLabel || null;
+            const selectedType = labelToShow?.type || '';
+            const selectedCategory = labelToShow?.category || '';
+            const thresholdEnabled = labelToShow?.threshold?.enabled !== false;
+            const thresholdValue = labelToShow?.threshold?.value || 15;
+            const thresholdCondition = labelToShow?.threshold?.condition || 'decrease';
+            const fch = labelToShow?.fatigue_cooldown_hours;
+            const fatigueMode = (fch === undefined || fch === null) ? 'global' : (fch === 0 ? 'none' : 'custom');
+            const fatigueCooldownHours = (typeof fch === 'number' && fch > 0) ? fch : 24;
+
+            const modalHtml = `
+                <div class="modal fade show" id="labelEditorModal" tabindex="-1" style="display:block;background:rgba(0,0,0,0.5);">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="bi bi-tag me-2"></i>编辑图表标签</h5>
+                                <button type="button" class="btn-close" onclick="closeLabelEditor()"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="mb-3">
+                                    <label class="form-label">标签类型</label>
+                                    <select class="form-select" id="labelType" onchange="onLabelTypeChange()">
+                                        <option value="">无标签</option>
+                                        <option value="alert" ${selectedType === 'alert' ? 'selected' : ''}>预警类（触发智能预警）</option>
+                                        <option value="celebration" ${selectedType === 'celebration' ? 'selected' : ''}>喜报类（触发智能喜报）</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3" id="categoryGroup" style="display:${selectedType ? 'block' : 'none'}">
+                                    <label class="form-label">具体分类</label>
+                                    <select class="form-select" id="labelCategory">
+                                        ${selectedType === 'alert' ? `
+                                            <option value="inventory" ${selectedCategory === 'inventory' ? 'selected' : ''}>库存预警</option>
+                                            <option value="cost" ${selectedCategory === 'cost' ? 'selected' : ''}>成本预警</option>
+                                            <option value="risk" ${selectedCategory === 'risk' ? 'selected' : ''}>风险预警</option>
+                                        ` : selectedType === 'celebration' ? `
+                                            <option value="gmv" ${selectedCategory === 'gmv' ? 'selected' : ''}>销售额/GMV</option>
+                                            <option value="growth" ${selectedCategory === 'growth' ? 'selected' : ''}>业务增长</option>
+                                            <option value="performance" ${selectedCategory === 'performance' ? 'selected' : ''}>业绩达成</option>
+                                        ` : ''}
+                                    </select>
+                                </div>
+                                <div class="mb-3" id="thresholdGroup" style="display:${selectedType ? 'block' : 'none'}">
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="thresholdEnabled" ${thresholdEnabled ? 'checked' : ''}>
+                                        <label class="form-check-label" for="thresholdEnabled">启用阈值检测</label>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-6">
+                                            <label class="form-label small">触发条件</label>
+                                            <select class="form-select form-select-sm" id="thresholdCondition">
+                                                <option value="decrease" ${thresholdCondition === 'decrease' ? 'selected' : ''}>下降时触发</option>
+                                                <option value="increase" ${thresholdCondition === 'increase' ? 'selected' : ''}>上升时触发</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label small">阈值 (%)</label>
+                                            <input type="number" class="form-control form-control-sm" id="thresholdValue" value="${thresholdValue}" min="1" max="100">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-3" id="fatigueGroup" style="display:${selectedType ? 'block' : 'none'}">
+                                    <label class="form-label small">疲劳度控制</label>
+                                    <select class="form-select form-select-sm" id="fatigueMode" onchange="toggleFatigueCustom()">
+                                        <option value="global" ${fatigueMode === 'global' ? 'selected' : ''}>使用全局设置</option>
+                                        <option value="none" ${fatigueMode === 'none' ? 'selected' : ''}>不限制（每次都发）</option>
+                                        <option value="custom" ${fatigueMode === 'custom' ? 'selected' : ''}>自定义冷却（小时）</option>
+                                    </select>
+                                    <div class="mt-2" id="fatigueCustomWrap" style="display:${fatigueMode === 'custom' ? 'block' : 'none'}">
+                                        <input type="number" class="form-control form-control-sm" id="fatigueCooldownHours" value="${fatigueCooldownHours}" min="0.5" max="720" step="0.5" placeholder="24">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-outline-danger" onclick="deleteLabel('${messageId}')">删除标签</button>
+                                <button type="button" class="btn btn-secondary" onclick="closeLabelEditor()">取消</button>
+                                <button type="button" class="btn btn-primary" onclick="saveLabel('${messageId}')">保存</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        }
+
+        function onLabelTypeChange() {
+            const type = document.getElementById('labelType').value;
+            const categoryGroup = document.getElementById('categoryGroup');
+            const thresholdGroup = document.getElementById('thresholdGroup');
+            const fatigueGroup = document.getElementById('fatigueGroup');
+            const categorySelect = document.getElementById('labelCategory');
+            
+            if (type) {
+                categoryGroup.style.display = 'block';
+                thresholdGroup.style.display = 'block';
+                if (fatigueGroup) fatigueGroup.style.display = 'block';
+                
+                const categories = LABEL_CATEGORIES[type]?.categories || {};
+                categorySelect.innerHTML = Object.entries(categories).map(([k, v]) => 
+                    `<option value="${k}">${v.name}</option>`
+                ).join('');
+                
+                const conditionSelect = document.getElementById('thresholdCondition');
+                conditionSelect.value = type === 'alert' ? 'decrease' : 'increase';
+                toggleFatigueCustom();
+            } else {
+                categoryGroup.style.display = 'none';
+                thresholdGroup.style.display = 'none';
+                if (fatigueGroup) fatigueGroup.style.display = 'none';
+            }
+        }
+
+        function toggleFatigueCustom() {
+            const wrap = document.getElementById('fatigueCustomWrap');
+            const sel = document.getElementById('fatigueMode');
+            if (wrap && sel) wrap.style.display = sel.value === 'custom' ? 'block' : 'none';
+        }
+
+        function closeLabelEditor() {
+            const modal = document.getElementById('labelEditorModal');
+            if (modal) modal.remove();
+        }
+
+        async function saveLabel(messageId) {
+            const type = document.getElementById('labelType').value;
+            
+            if (!type) {
+                // 删除标签
+                await deleteLabel(messageId);
+                return;
+            }
+            
+            const fatigueModeEl = document.getElementById('fatigueMode');
+            const fatigueMode = fatigueModeEl ? fatigueModeEl.value : 'global';
+            let fatigueCooldownHours = null;
+            if (fatigueMode === 'none') fatigueCooldownHours = 0;
+            else if (fatigueMode === 'custom') {
+                const hoursEl = document.getElementById('fatigueCooldownHours');
+                const v = hoursEl ? parseFloat(hoursEl.value) : NaN;
+                fatigueCooldownHours = (v > 0) ? v : 24;
+            }
+            const label = {
+                type: type,
+                category: document.getElementById('labelCategory').value,
+                ai_suggested: false,
+                threshold: {
+                    enabled: document.getElementById('thresholdEnabled').checked,
+                    condition: document.getElementById('thresholdCondition').value,
+                    value: parseFloat(document.getElementById('thresholdValue').value) || 15,
+                    ai_recommended: false
+                },
+                fatigue_cooldown_hours: fatigueCooldownHours
+            };
+            
+            try {
+                const res = await authFetch(`/api/v0/analytics/pinned/${messageId}/label`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(label)
+                });
+                const data = await res.json();
+                const ok = res.ok && data.success;
+                if (ok) {
+                    closeLabelEditor();
+                    try {
+                        await loadPinnedCharts();
+                    } catch (e) {
+                        console.warn('Refresh pinned charts after save:', e);
+                    }
+                } else {
+                    alert('保存失败: ' + (data.error || '未知错误'));
+                }
+            } catch (e) {
+                console.error('Save label error:', e);
+                alert('保存请求失败');
+            }
+        }
+
+        async function deleteLabel(messageId) {
+            try {
+                await authFetch(`/api/v0/analytics/pinned/${messageId}/label`, { method: 'DELETE' });
+                closeLabelEditor();
+                await loadPinnedCharts();
+            } catch (e) {
+                console.error('Delete label error:', e);
+            }
+        }
+
+        // ============ 语音识别功能 ============
+        let isRecording = false;
+        let mediaRecorder = null;
+        let audioChunks = [];
+
+        async function toggleVoiceRecording() {
+            const btn = document.getElementById('voiceBtn');
+            const icon = document.getElementById('voiceIcon');
+            
+            if (isRecording) {
+                // 停止录音
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    mediaRecorder.stop();
+                }
+                isRecording = false;
+                btn.style.background = 'var(--vanna-bg)';
+                icon.className = 'bi bi-mic';
+            } else {
+                // 开始录音
+                try {
+                    // 检查语音服务状态
+                    const statusRes = await authFetch('/api/v0/speech/status');
+                    const status = await statusRes.json();
+                    if (!status.configured) {
+                        alert('语音识别服务未配置，请联系管理员');
+                        return;
+                    }
+
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        stream.getTracks().forEach(track => track.stop());
+                        
+                        // 发送到服务器识别
+                        const formData = new FormData();
+                        formData.append('audio', audioBlob, 'recording.webm');
+                        formData.append('format', 'pcm');
+                        formData.append('sample_rate', '16000');
+                        
+                        try {
+                            btn.disabled = true;
+                            icon.className = 'bi bi-hourglass-split';
+                            
+                            const res = await authFetch('/api/v0/speech/recognize', {
+                                method: 'POST',
+                                body: formData
+                            });
+                            const result = await res.json();
+                            
+                            if (result.success && result.text) {
+                                document.getElementById('questionInput').value = result.text;
+                            } else {
+                                alert(result.error || '语音识别失败');
+                            }
+                        } catch (e) {
+                            console.error('Speech recognition error:', e);
+                            alert('语音识别请求失败');
+                        } finally {
+                            btn.disabled = false;
+                            icon.className = 'bi bi-mic';
+                        }
+                    };
+
+                    mediaRecorder.start();
+                    isRecording = true;
+                    btn.style.background = '#ef4444';
+                    icon.className = 'bi bi-mic-fill';
+                } catch (e) {
+                    console.error('Failed to start recording:', e);
+                    alert('无法访问麦克风，请检查权限设置');
+                }
+            }
+        }
+
+        // ============ 预警与喜报检测 ============
+        async function checkAlertsAndCelebrations() {
+            const btn = document.getElementById('checkAlertsBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 检测中...';
+            
+            try {
+                const res = await authFetch('/api/v0/analytics/alerts/check', { method: 'POST' });
+                const data = await res.json();
+                
+                if (data.success) {
+                    const alerts = data.alerts || [];
+                    const celebrations = data.celebrations || [];
+                    
+                    let message = `检测完成！\n\n`;
+                    message += `检测图表数: ${data.checked_count}\n`;
+                    message += `触发预警: ${alerts.length} 条\n`;
+                    message += `触发喜报: ${celebrations.length} 条\n`;
+                    
+                    if (alerts.length > 0) {
+                        message += `\n--- 预警详情 ---\n`;
+                        alerts.forEach((a, i) => {
+                            message += `${i+1}. [${a.severity}] ${a.title}\n`;
+                        });
+                    }
+                    
+                    if (celebrations.length > 0) {
+                        message += `\n--- 喜报详情 ---\n`;
+                        celebrations.forEach((c, i) => {
+                            message += `${i+1}. ${c.title}: ${c.achievement}\n`;
+                        });
+                    }
+                    
+                    alert(message);
+                    
+                    // 询问是否发送到飞书
+                    if ((alerts.length > 0 || celebrations.length > 0) && 
+                        confirm('是否将预警/喜报发送到飞书群？')) {
+                        for (const a of alerts) {
+                            await sendAlertToLark(a);
+                        }
+                        for (const c of celebrations) {
+                            await sendCelebrationToLark(c);
+                        }
+                    }
+                } else {
+                    alert('检测失败: ' + (data.error || '未知错误'));
+                }
+            } catch (e) {
+                console.error('Check alerts error:', e);
+                alert('检测请求失败');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-bell"></i> 检测预警';
+            }
+        }
+
+        async function sendAlertToLark(alert) {
+            try {
+                await authFetch('/api/v0/lark/send-alert', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(alert)
+                });
+            } catch (e) {
+                console.error('Send alert to lark failed:', e);
+            }
+        }
+
+        async function sendCelebrationToLark(celebration) {
+            try {
+                await authFetch('/api/v0/lark/send-celebration', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(celebration)
+                });
+            } catch (e) {
+                console.error('Send celebration to lark failed:', e);
+            }
+        }
+
+        // ============ 飞书群发送功能 ============
+        let larkGroups = [];
+
+        async function loadLarkGroups() {
+            try {
+                const res = await authFetch('/api/v0/lark/groups');
+                const data = await res.json();
+                larkGroups = data.groups || [];
+                return larkGroups;
+            } catch (e) {
+                console.error('Load lark groups failed:', e);
+                return [];
+            }
+        }
+
+        // 加载飞书群到报告弹框的下拉菜单
+        async function loadLarkGroupsToDropdown() {
+            const dropdownMenu = document.getElementById('larkGroupDropdownMenu');
+            if (!dropdownMenu) return;
+            
+            try {
+                await loadLarkGroups();
+                
+                if (larkGroups.length === 0) {
+                    dropdownMenu.innerHTML = `<li><span class="dropdown-item-text text-muted small">未配置飞书群</span></li>`;
+                    return;
+                }
+                
+                let menuHtml = '';
+                larkGroups.forEach(group => {
+                    menuHtml += `
+                        <li>
+                            <a class="dropdown-item" href="javascript:void(0)" onclick="sendReportToLarkFromModal('${group.id}', '${group.name}')">
+                                <i class="bi bi-chat-dots me-2"></i>${group.name}
+                                ${group.description ? `<small class="text-muted d-block">${group.description}</small>` : ''}
+                            </a>
+                        </li>
+                    `;
+                });
+                dropdownMenu.innerHTML = menuHtml;
+            } catch (e) {
+                console.error('Load lark groups to dropdown failed:', e);
+                dropdownMenu.innerHTML = `<li><span class="dropdown-item-text text-danger small">加载失败</span></li>`;
+            }
+        }
+
+        // 从报告弹框直接发送到飞书
+        async function sendReportToLarkFromModal(groupId, groupName) {
+            if (!currentReportContent) {
+                alert('报告内容为空，请先生成报告');
+                return;
+            }
+            
+            const sendBtn = document.getElementById('sendToLarkDropdown');
+            const originalText = sendBtn.innerHTML;
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>发送中...';
+            
+            try {
+                // 准备图表图片数据
+                const chartImages = currentChartImages.map(img => img.dataUrl);
+                
+                const res = await authFetch('/api/v0/lark/send-report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        group_id: groupId,
+                        report_content: currentReportContent,
+                        chart_images: chartImages,
+                        report_type: 'insight'
+                    })
+                });
+                
+                const data = await res.json();
+                
+                if (data.success) {
+                    // 显示成功提示
+                    showToast(`报告已成功发送到 ${groupName}`, 'success');
+                } else {
+                    alert('发送失败: ' + (data.error || '未知错误'));
+                }
+            } catch (e) {
+                console.error('Send report to lark failed:', e);
+                alert('发送失败，请检查网络连接');
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = originalText;
+            }
+        }
+
+        // 显示 Toast 提示
+        function showToast(message, type = 'info') {
+            const toastId = 'toast-' + Date.now();
+            const bgClass = type === 'success' ? 'bg-success' : type === 'error' ? 'bg-danger' : 'bg-info';
+            const toastHtml = `
+                <div id="${toastId}" class="toast align-items-center text-white ${bgClass} border-0 position-fixed" 
+                     style="top: 20px; right: 20px; z-index: 9999;" role="alert">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            <i class="bi bi-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'} me-2"></i>
+                            ${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', toastHtml);
+            const toastEl = document.getElementById(toastId);
+            const toast = new bootstrap.Toast(toastEl, { delay: 3000 });
+            toast.show();
+            toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+        }
+
+        async function showSendToLarkModal() {
+            // 检查是否有洞察报告
+            if (!currentReportContent && !lastGeneratedReport) {
+                alert('请先生成AI洞察报告');
+                return;
+            }
+            
+            // 加载飞书群列表
+            await loadLarkGroups();
+            
+            if (larkGroups.length === 0) {
+                alert('未配置飞书群，请联系管理员配置LARK_WEBHOOK_URL');
+                return;
+            }
+            
+            // 构建选择列表
+            const groupOptions = larkGroups.map(g => 
+                `<option value="${g.id}">${g.name}${g.description ? ' - ' + g.description : ''}</option>`
+            ).join('');
+            
+            const modalHtml = `
+                <div class="modal fade show" id="sendLarkModal" tabindex="-1" style="display:block;background:rgba(0,0,0,0.5);">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="bi bi-send me-2"></i>发送到飞书</h5>
+                                <button type="button" class="btn-close" onclick="closeSendLarkModal()"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="mb-3">
+                                    <label class="form-label">选择目标群</label>
+                                    <select class="form-select" id="larkGroupSelect">
+                                        ${groupOptions}
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">报告类型</label>
+                                    <select class="form-select" id="reportTypeSelect">
+                                        <option value="insight">AI洞察报告</option>
+                                        <option value="alert">预警通知</option>
+                                        <option value="celebration">喜报通知</option>
+                                    </select>
+                                </div>
+                                <div class="text-muted small">
+                                    将发送最近生成的AI洞察报告到选定的飞书群
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" onclick="closeSendLarkModal()">取消</button>
+                                <button type="button" class="btn btn-primary" onclick="confirmSendToLark()">
+                                    <i class="bi bi-send me-1"></i>发送
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        }
+
+        function closeSendLarkModal() {
+            const modal = document.getElementById('sendLarkModal');
+            if (modal) modal.remove();
+        }
+
+        let lastGeneratedReport = '';
+
+        async function confirmSendToLark() {
+            const groupId = document.getElementById('larkGroupSelect').value;
+            const reportType = document.getElementById('reportTypeSelect').value;
+            
+            if (!groupId) {
+                alert('请选择目标群');
+                return;
+            }
+            
+            const reportContent = currentReportContent || lastGeneratedReport;
+            if (!reportContent) {
+                alert('没有可发送的报告内容');
+                closeSendLarkModal();
+                return;
+            }
+            
+            try {
+                // 与下拉发送一致：传递图表截图（dataURL），便于飞书卡片中展示图表
+                const chartImages = (typeof currentChartImages !== 'undefined' && Array.isArray(currentChartImages))
+                    ? currentChartImages.map(img => img.dataUrl || img)
+                    : [];
+                const res = await authFetch('/api/v0/lark/send-report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        group_id: groupId,
+                        report_content: reportContent,
+                        report_type: reportType,
+                        chart_images: chartImages.length ? chartImages : undefined
+                    })
+                });
+                
+                const result = await res.json();
+                if (result.success) {
+                    alert('发送成功！');
+                    closeSendLarkModal();
+                } else {
+                    alert('发送失败: ' + (result.error || '未知错误'));
+                }
+            } catch (e) {
+                console.error('Send to lark error:', e);
+                alert('发送请求失败');
+            }
+        }
+
+        // 修改原有的 generateInsightReport 函数，保存报告内容
+        const originalGenerateInsightReport = typeof generateInsightReport === 'function' ? generateInsightReport : null;
+        
+        // Hook报告生成，保存内容供飞书发送
+        function hookReportGeneration() {
+            const reportModal = document.getElementById('insightReportModal');
+            if (reportModal) {
+                const observer = new MutationObserver((mutations) => {
+                    mutations.forEach((mutation) => {
+                        if (mutation.type === 'childList' || mutation.type === 'characterData') {
+                            const contentEl = document.getElementById('reportContent');
+                            if (contentEl && contentEl.textContent) {
+                                lastGeneratedReport = contentEl.textContent;
+                            }
+                        }
+                    });
+                });
+                observer.observe(reportModal, { childList: true, subtree: true, characterData: true });
+            }
+        }
+        
+        // 在页面加载后设置hook
+        setTimeout(hookReportGeneration, 1000);
     </script>
 </body>
 </html>

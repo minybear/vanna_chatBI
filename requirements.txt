@@ -8,3 +8,4 @@ zhipuai
 PyJWT>=2.8.0
 python-multipart
 cryptography
+websockets>=11.0

@@ -76,12 +76,23 @@ class AnalyticsManager:
         }
         self._add_event(payload, operator_id)
 
+    def record_dashboard_refresh(self, operator_id: str = "") -> None:
+        """记录看板图表刷新时间，用于洞察概述的「数据更新」展示。"""
+        payload = {
+            "type": "dashboard_refresh",
+            "timestamp": datetime.now().isoformat(),
+            "operator_id": operator_id or "",
+        }
+        self._add_event(payload, operator_id)
+
     def get_metrics(self, operator_id: str = "") -> SystemMetrics:
         events = self._get_events(operator_id)
         query_events = [e for e in events if e.get("type") == "query"]
         feedback_events = [e for e in events if e.get("type") == "feedback"]
+        dashboard_refresh_events = [e for e in events if e.get("type") == "dashboard_refresh"]
 
         last_query_time = None
+        last_dashboard_refresh_time = None
         latencies = []
         total_queries_today = 0
         today = datetime.now().date()
@@ -97,13 +108,20 @@ class AnalyticsManager:
             if isinstance(latency, int):
                 latencies.append(latency)
 
+        for event in dashboard_refresh_events:
+            ts = self._parse_time(event.get("timestamp"))
+            if ts and (last_dashboard_refresh_time is None or ts > last_dashboard_refresh_time):
+                last_dashboard_refresh_time = ts
+
         up_count = sum(1 for e in feedback_events if e.get("feedback_type") == "up")
         down_count = sum(1 for e in feedback_events if e.get("feedback_type") == "down")
         total_feedback = up_count + down_count
         ai_accuracy = round((up_count / total_feedback) * 100, 2) if total_feedback else 0.0
         avg_latency = int(median(latencies)) if latencies else 0
 
-        data_freshness = self._humanize_delta(last_query_time) if last_query_time else "暂无数据"
+        # 数据更新：优先使用看板图表最后刷新时间，无则用最后查询时间
+        freshness_ts = last_dashboard_refresh_time or last_query_time
+        data_freshness = self._humanize_delta(freshness_ts) if freshness_ts else "暂无数据"
 
         return SystemMetrics(
             data_freshness=data_freshness,
