@@ -793,3 +793,109 @@ def send_celebration_to_lark(
         operator_id=operator_id,
     )
     return result
+
+
+# ============ 彩蛋图表 API ============
+
+@router.get("/analytics/easter-egg/aigc-contest")
+def get_aigc_contest_trend():
+    """
+    彩蛋图表：AIGC 大赛决赛作品近一周关注度变化趋势
+    展示 6 个参赛作品的模拟关注度数据
+    """
+    import random
+    from datetime import datetime, timedelta
+    
+    # 6 个参赛作品
+    projects = [
+        {"name": "Redtea-ChatBI", "base": 850, "growth": 1.15, "color": "#15a8a8"},  # 我们的产品，高起点高增长
+        {"name": "作品A", "base": 420, "growth": 1.08, "color": "#5470c6"},
+        {"name": "作品B", "base": 380, "growth": 1.05, "color": "#91cc75"},
+        {"name": "作品C", "base": 350, "growth": 1.03, "color": "#fac858"},
+        {"name": "作品D", "base": 300, "growth": 1.02, "color": "#ee6666"},
+        {"name": "作品E", "base": 280, "growth": 1.01, "color": "#73c0de"},
+    ]
+    
+    # 生成近 7 天的日期
+    today = datetime.now()
+    dates = [(today - timedelta(days=6-i)).strftime("%m-%d") for i in range(7)]
+    
+    # 生成每个作品的关注度数据（模拟真实增长趋势）
+    series_data = []
+    for project in projects:
+        values = []
+        current_value = project["base"]
+        random.seed(hash(project["name"]))  # 固定随机种子，保证每次数据一致
+        for i in range(7):
+            # 添加一些随机波动，但整体趋势向上
+            fluctuation = random.uniform(0.92, 1.08)
+            current_value = int(current_value * project["growth"] * fluctuation)
+            values.append(current_value)
+        
+        series_data.append({
+            "name": project["name"],
+            "type": "line",
+            "smooth": True,
+            "symbol": "circle",
+            "symbolSize": 8,
+            "lineStyle": {"width": 3, "color": project["color"]},
+            "itemStyle": {"color": project["color"]},
+            "emphasis": {"focus": "series"},
+            "data": values,
+        })
+    
+    # 返回 ECharts 配置
+    chart_option = {
+        "title": {
+            "text": "🏆 AIGC 大赛决赛作品关注度趋势",
+            "subtext": "近一周数据 | 祝 Redtea-ChatBI 夺冠！",
+            "left": "center",
+            "textStyle": {"fontSize": 16, "fontWeight": "bold", "color": "#023d60"},
+            "subtextStyle": {"fontSize": 12, "color": "#64748b"},
+        },
+        "tooltip": {
+            "trigger": "axis",
+            "backgroundColor": "rgba(255, 255, 255, 0.95)",
+            "borderColor": "#e2e8f0",
+            "borderWidth": 1,
+            "textStyle": {"color": "#0f172a"},
+            "axisPointer": {"type": "cross"},
+        },
+        "legend": {
+            "data": [p["name"] for p in projects],
+            "bottom": 0,
+            "textStyle": {"fontSize": 11},
+        },
+        "grid": {
+            "left": "3%",
+            "right": "4%",
+            "bottom": "15%",
+            "top": "18%",
+            "containLabel": True,
+        },
+        "xAxis": {
+            "type": "category",
+            "boundaryGap": False,
+            "data": dates,
+            "axisLine": {"lineStyle": {"color": "#e2e8f0"}},
+            "axisLabel": {"color": "#64748b"},
+        },
+        "yAxis": {
+            "type": "value",
+            "name": "关注度",
+            "nameTextStyle": {"color": "#64748b"},
+            "axisLine": {"show": False},
+            "axisTick": {"show": False},
+            "splitLine": {"lineStyle": {"color": "#f1f5f9"}},
+            "axisLabel": {"color": "#64748b"},
+        },
+        "series": series_data,
+    }
+    
+    return {
+        "success": True,
+        "title": "AIGC 大赛决赛作品关注度趋势",
+        "chart_option": chart_option,
+        "projects": [p["name"] for p in projects],
+        "dates": dates,
+    }

@@ -675,12 +675,12 @@ class LarkReportSender:
                     "img_key": img_key,
                     "alt": {"tag": "plain_text", "content": f"图表{i}"},
                 })
-        # 如果有图片但上传失败，提示用户
+        # 如果有图片但上传失败，提示用户配置应用凭证
         elif image_keys_for_card is not None and len(image_keys_for_card) == 0:
             elements.append({
                 "tag": "note",
                 "elements": [
-                    {"tag": "plain_text", "content": "⚠️ 图片上传失败，如需查看图表请使用富文本模式发送。"},
+                    {"tag": "plain_text", "content": "⚠️ 图片上传失败，请检查 LARK_APP_ID 和 LARK_APP_SECRET 配置。"},
                 ],
             })
         # 如果有图片但不内嵌，提示图表将单独发送

@@ -1049,10 +1049,82 @@
                     </div>
                 </div>
 
+                <!-- 彩蛋图表：AIGC 大赛关注度趋势（位于我的看板和AI洞察之间） -->
+                <div class="analytics-section" id="easterEggSection" style="display: none;">
+                    <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>🎉 彩蛋</span>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="toggleEasterEgg()" title="隐藏彩蛋">
+                            <i class="bi bi-eye-slash"></i>
+                        </button>
+                    </div>
+                    <div class="pinned-grid">
+                        <div class="pinned-card">
+                            <div class="pinned-card-header">
+                                <span title="AIGC大赛决赛作品近一周关注度趋势">AIGC大赛决赛作品近一周关注度趋势</span>
+                                <div class="pinned-card-actions">
+                                    <button class="btn btn-sm btn-success" id="easterEggInsightBtn" onclick="triggerEasterEggInsight()" title="AI洞察">
+                                        <i class="bi bi-lightbulb"></i> AI洞察
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="openEasterEggFullscreen()" title="全屏查看">
+                                        <i class="bi bi-arrows-fullscreen"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="refreshEasterEggChart()" title="刷新数据">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="toggleEasterEgg()" title="关闭">
+                                        <i class="bi bi-x"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="easterEggChart" class="pinned-chart" style="min-height: 280px; height: 280px;"></div>
+                            <div class="text-muted small mt-2" id="easterEggRefreshTime">刷新于 --</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="analytics-section">
                     <div class="section-title">AI 洞察</div>
                     <div class="insights-grid" id="insightsGrid">
                         <div class="insight-placeholder">暂无洞察数据</div>
+                    </div>
+                </div>
+                
+                <!-- 烟花效果容器 -->
+                <canvas id="fireworksCanvas" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9998; display: none;"></canvas>
+                
+                <!-- AI洞察弹窗 -->
+                <div class="modal fade" id="easterEggInsightModal" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content" style="border-radius: 16px; overflow: hidden;">
+                            <div class="modal-header" style="background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%); border: none;">
+                                <h5 class="modal-title text-white"><i class="bi bi-trophy-fill me-2"></i>AI 洞察分析结果</h5>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body text-center p-4">
+                                <div id="easterEggInsightLoading" style="display: none;">
+                                    <div class="spinner-border text-primary mb-3" role="status">
+                                        <span class="visually-hidden">分析中...</span>
+                                    </div>
+                                    <p class="text-muted">AI 正在深度分析参赛作品数据...</p>
+                                </div>
+                                <div id="easterEggInsightResult" style="display: none;">
+                                    <div class="mb-3">
+                                        <span style="font-size: 64px;">🏆</span>
+                                    </div>
+                                    <p style="font-size: 16px; line-height: 1.8; color: #1e293b;">
+                                        根据对参赛作品关注度增长趋势的洞察分析，<strong style="color: #ff6b6b; font-size: 18px;">Redtea-ChatBI</strong> 一骑绝尘，本次AIGC大赛的冠军有 
+                                        <span style="color: #ff6b6b; font-size: 24px; font-weight: bold;">99.99%</span> 
+                                        的几率可能是 <strong style="color: #ff6b6b;">Redtea-ChatBI</strong>！
+                                    </p>
+                                    <div class="mt-3">
+                                        <span style="font-size: 32px;">🎉🎊✨🌟🔥</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer justify-content-center" style="border: none;">
+                                <button type="button" class="btn btn-outline-secondary rounded-pill px-4" data-bs-dismiss="modal">关闭</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -6753,6 +6825,431 @@
         
         // 在页面加载后设置hook
         setTimeout(hookReportGeneration, 1000);
+
+        // ============ 彩蛋图表：AIGC 大赛关注度趋势 ============
+        let easterEggChart = null;
+        let easterEggVisible = false;
+        let fireworksAnimationId = null;
+
+        // 生成模拟数据：6个参赛作品近一周的关注度变化
+        function generateEasterEggData() {
+            const products = ['Redtea-ChatBI', '作品A', '作品B', '作品C', '作品D', '作品E'];
+            const days = [];
+            const today = new Date();
+            
+            // 生成近一周的日期
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date(today);
+                date.setDate(date.getDate() - i);
+                days.push(`${date.getMonth() + 1}/${date.getDate()}`);
+            }
+
+            // 生成各作品的关注度数据
+            const seriesData = {};
+            
+            // Redtea-ChatBI：起步高，增长迅猛（指数级增长）
+            seriesData['Redtea-ChatBI'] = [1200, 2800, 5500, 9800, 18500, 35000, 68000];
+            
+            // 其他作品：起步较低，线性缓慢增长
+            seriesData['作品A'] = [800, 950, 1100, 1280, 1450, 1680, 1950];
+            seriesData['作品B'] = [600, 720, 850, 980, 1120, 1280, 1450];
+            seriesData['作品C'] = [550, 640, 750, 870, 1000, 1150, 1320];
+            seriesData['作品D'] = [450, 520, 600, 690, 790, 900, 1030];
+            seriesData['作品E'] = [380, 430, 490, 560, 640, 730, 840];
+
+            return { days, products, seriesData };
+        }
+
+        // 渲染彩蛋图表
+        function renderEasterEggChart() {
+            const chartDom = document.getElementById('easterEggChart');
+            if (!chartDom) return;
+
+            // 如果已有实例，先销毁
+            if (easterEggChart) {
+                easterEggChart.dispose();
+            }
+
+            easterEggChart = echarts.init(chartDom);
+            const { days, products, seriesData } = generateEasterEggData();
+
+            // 定义每个作品的颜色
+            const colors = {
+                'Redtea-ChatBI': '#ff6b6b',  // 红色突出
+                '作品A': '#4ecdc4',
+                '作品B': '#45b7d1',
+                '作品C': '#96ceb4',
+                '作品D': '#ffeaa7',
+                '作品E': '#dfe6e9'
+            };
+
+            const series = products.map(product => ({
+                name: product,
+                type: 'line',
+                data: seriesData[product],
+                smooth: 0.4,
+                symbol: product === 'Redtea-ChatBI' ? 'circle' : 'emptyCircle',
+                symbolSize: product === 'Redtea-ChatBI' ? 10 : 6,
+                lineStyle: {
+                    width: product === 'Redtea-ChatBI' ? 4 : 2,
+                    color: colors[product]
+                },
+                itemStyle: {
+                    color: colors[product]
+                },
+                areaStyle: product === 'Redtea-ChatBI' ? {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: 'rgba(255, 107, 107, 0.5)' },
+                        { offset: 1, color: 'rgba(255, 107, 107, 0.05)' }
+                    ])
+                } : null,
+                emphasis: {
+                    focus: 'series',
+                    lineStyle: { width: product === 'Redtea-ChatBI' ? 5 : 3 }
+                },
+                // 为 Redtea-ChatBI 显示数据标签
+                label: product === 'Redtea-ChatBI' ? {
+                    show: true,
+                    position: 'top',
+                    formatter: params => params.dataIndex === 6 ? '🚀 ' + params.value.toLocaleString() : '',
+                    fontSize: 14,
+                    fontWeight: 'bold',
+                    color: '#ff6b6b'
+                } : { show: false }
+            }));
+
+            const option = {
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: 'rgba(30, 41, 59, 0.95)',
+                    borderColor: 'rgba(255, 107, 107, 0.3)',
+                    borderWidth: 1,
+                    textStyle: { color: '#fff' },
+                    formatter: function(params) {
+                        let tooltip = `<div style="font-weight:bold;margin-bottom:8px;">${params[0].axisValue}</div>`;
+                        // 按关注度排序
+                        const sorted = [...params].sort((a, b) => b.value - a.value);
+                        sorted.forEach((item, idx) => {
+                            const medal = idx === 0 ? '🥇 ' : idx === 1 ? '🥈 ' : idx === 2 ? '🥉 ' : '　 ';
+                            const highlight = item.seriesName === 'Redtea-ChatBI' ? 'font-weight:bold;color:#ff6b6b;' : '';
+                            tooltip += `<div style="${highlight}">${medal}${item.marker}${item.seriesName}: ${item.value.toLocaleString()}</div>`;
+                        });
+                        return tooltip;
+                    }
+                },
+                legend: {
+                    data: products,
+                    top: 10,
+                    textStyle: { color: '#64748b' },
+                    itemWidth: 20,
+                    itemHeight: 10
+                },
+                grid: {
+                    left: '60px',
+                    right: '40px',
+                    top: '50px',
+                    bottom: '40px',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    data: days,
+                    boundaryGap: false,
+                    axisLabel: { color: '#64748b', fontSize: 12 },
+                    axisLine: { lineStyle: { color: '#e2e8f0' } }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: '关注度',
+                    nameTextStyle: { color: '#64748b' },
+                    axisLabel: {
+                        color: '#64748b',
+                        formatter: val => val >= 1000 ? (val / 1000).toFixed(0) + 'k' : val
+                    },
+                    splitLine: { lineStyle: { type: 'dashed', color: '#e2e8f0' } }
+                },
+                series: series,
+                // 动画效果
+                animationDuration: 2000,
+                animationEasing: 'cubicOut'
+            };
+
+            easterEggChart.setOption(option);
+            
+            // 更新刷新时间
+            updateEasterEggRefreshTime();
+
+            // 响应式调整
+            window.addEventListener('resize', () => {
+                if (easterEggChart) easterEggChart.resize();
+            });
+        }
+        
+        // 更新彩蛋图表刷新时间
+        function updateEasterEggRefreshTime() {
+            const timeEl = document.getElementById('easterEggRefreshTime');
+            if (timeEl) {
+                const now = new Date().toISOString();
+                timeEl.textContent = `刷新于 ${now}`;
+            }
+        }
+        
+        // 刷新彩蛋图表
+        function refreshEasterEggChart() {
+            renderEasterEggChart();
+            showToast('图表已刷新', 'success');
+        }
+        
+        // 全屏查看彩蛋图表
+        function openEasterEggFullscreen() {
+            const chartDom = document.getElementById('easterEggChart');
+            if (chartDom && chartDom.requestFullscreen) {
+                chartDom.requestFullscreen();
+            }
+        }
+        
+        // ============ AI洞察功能 ============
+        function triggerEasterEggInsight() {
+            const modal = new bootstrap.Modal(document.getElementById('easterEggInsightModal'));
+            const loadingEl = document.getElementById('easterEggInsightLoading');
+            const resultEl = document.getElementById('easterEggInsightResult');
+            const btn = document.getElementById('easterEggInsightBtn');
+            
+            // 禁用按钮防止重复点击
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>分析中...';
+            
+            // 显示加载状态
+            loadingEl.style.display = 'block';
+            resultEl.style.display = 'none';
+            modal.show();
+            
+            // 等待2秒后显示结果
+            setTimeout(() => {
+                loadingEl.style.display = 'none';
+                resultEl.style.display = 'block';
+                
+                // 恢复按钮状态
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-lightbulb"></i> AI洞察';
+                
+                // 结果显示后再等2秒触发烟花效果
+                setTimeout(startFireworks, 2000);
+            }, 2000);
+        }
+        
+        // ============ 像素烟花效果 ============
+        function startFireworks() {
+            const canvas = document.getElementById('fireworksCanvas');
+            if (!canvas) return;
+            
+            canvas.style.display = 'block';
+            const ctx = canvas.getContext('2d');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            const particles = [];
+            const fireworks = [];
+            const colors = ['#ff6b6b', '#feca57', '#48dbfb', '#ff9ff3', '#54a0ff', '#5f27cd', '#00d2d3', '#1dd1a1'];
+            
+            // 像素粒子类
+            class Particle {
+                constructor(x, y, color) {
+                    this.x = x;
+                    this.y = y;
+                    this.color = color;
+                    this.size = Math.random() * 4 + 2;
+                    this.speedX = (Math.random() - 0.5) * 8;
+                    this.speedY = (Math.random() - 0.5) * 8;
+                    this.gravity = 0.1;
+                    this.friction = 0.98;
+                    this.alpha = 1;
+                    this.decay = Math.random() * 0.015 + 0.01;
+                }
+                
+                update() {
+                    this.speedX *= this.friction;
+                    this.speedY *= this.friction;
+                    this.speedY += this.gravity;
+                    this.x += this.speedX;
+                    this.y += this.speedY;
+                    this.alpha -= this.decay;
+                }
+                
+                draw() {
+                    ctx.save();
+                    ctx.globalAlpha = this.alpha;
+                    ctx.fillStyle = this.color;
+                    // 像素风格：使用方块而非圆形
+                    ctx.fillRect(Math.floor(this.x), Math.floor(this.y), this.size, this.size);
+                    ctx.restore();
+                }
+            }
+            
+            // 烟花类
+            class Firework {
+                constructor() {
+                    this.x = Math.random() * canvas.width;
+                    this.y = canvas.height;
+                    this.targetY = Math.random() * canvas.height * 0.5;
+                    this.speed = Math.random() * 3 + 4;
+                    this.color = colors[Math.floor(Math.random() * colors.length)];
+                    this.exploded = false;
+                    this.size = 4;
+                }
+                
+                update() {
+                    if (!this.exploded) {
+                        this.y -= this.speed;
+                        if (this.y <= this.targetY) {
+                            this.explode();
+                        }
+                    }
+                }
+                
+                explode() {
+                    this.exploded = true;
+                    const particleCount = 50 + Math.floor(Math.random() * 30);
+                    for (let i = 0; i < particleCount; i++) {
+                        particles.push(new Particle(this.x, this.y, this.color));
+                    }
+                }
+                
+                draw() {
+                    if (!this.exploded) {
+                        ctx.fillStyle = this.color;
+                        ctx.fillRect(Math.floor(this.x), Math.floor(this.y), this.size, this.size);
+                        // 拖尾效果
+                        ctx.fillStyle = this.color + '80';
+                        ctx.fillRect(Math.floor(this.x), Math.floor(this.y + 5), this.size, this.size);
+                        ctx.fillStyle = this.color + '40';
+                        ctx.fillRect(Math.floor(this.x), Math.floor(this.y + 10), this.size, this.size);
+                    }
+                }
+            }
+            
+            let frameCount = 0;
+            const maxFrames = 300; // 约5秒
+            
+            function animate() {
+                frameCount++;
+                
+                // 半透明覆盖，产生拖尾效果
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // 随机生成新烟花
+                if (frameCount < 180 && Math.random() < 0.08) {
+                    fireworks.push(new Firework());
+                }
+                
+                // 更新和绘制烟花
+                for (let i = fireworks.length - 1; i >= 0; i--) {
+                    fireworks[i].update();
+                    fireworks[i].draw();
+                    if (fireworks[i].exploded) {
+                        fireworks.splice(i, 1);
+                    }
+                }
+                
+                // 更新和绘制粒子
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    particles[i].update();
+                    particles[i].draw();
+                    if (particles[i].alpha <= 0) {
+                        particles.splice(i, 1);
+                    }
+                }
+                
+                // 继续动画或结束
+                if (frameCount < maxFrames || particles.length > 0 || fireworks.length > 0) {
+                    fireworksAnimationId = requestAnimationFrame(animate);
+                } else {
+                    stopFireworks();
+                }
+            }
+            
+            animate();
+            
+            // 5秒后自动停止
+            setTimeout(stopFireworks, 5000);
+        }
+        
+        function stopFireworks() {
+            const canvas = document.getElementById('fireworksCanvas');
+            if (fireworksAnimationId) {
+                cancelAnimationFrame(fireworksAnimationId);
+                fireworksAnimationId = null;
+            }
+            if (canvas) {
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                canvas.style.display = 'none';
+            }
+        }
+
+        // 切换彩蛋显示状态
+        function toggleEasterEgg() {
+            const section = document.getElementById('easterEggSection');
+            if (!section) return;
+
+            easterEggVisible = !easterEggVisible;
+            section.style.display = easterEggVisible ? 'block' : 'none';
+
+            if (easterEggVisible) {
+                // 延迟渲染确保 DOM 可见
+                setTimeout(renderEasterEggChart, 100);
+                showToast('🎉 发现彩蛋！祝 Redtea-ChatBI 勇夺桂冠！', 'success');
+            } else {
+                // 隐藏时停止烟花
+                stopFireworks();
+            }
+        }
+
+        // 彩蛋触发方式1：键盘快捷键 Ctrl+Shift+E
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.shiftKey && e.key === 'E') {
+                e.preventDefault();
+                toggleEasterEgg();
+            }
+        });
+
+        // 彩蛋触发方式2：在"我的看板"标题上连续点击5次
+        let easterEggClickCount = 0;
+        let easterEggClickTimer = null;
+
+        function setupEasterEggTrigger() {
+            const sectionTitle = document.querySelector('.analytics-section .section-title span');
+            if (sectionTitle && sectionTitle.textContent.includes('我的看板')) {
+                sectionTitle.style.cursor = 'pointer';
+                sectionTitle.addEventListener('click', function() {
+                    easterEggClickCount++;
+                    
+                    if (easterEggClickTimer) clearTimeout(easterEggClickTimer);
+                    
+                    easterEggClickTimer = setTimeout(() => {
+                        easterEggClickCount = 0;
+                    }, 2000);
+
+                    if (easterEggClickCount >= 3) {
+                        easterEggClickCount = 0;
+                        toggleEasterEgg();
+                    }
+                });
+            }
+        }
+
+        // 页面加载完成后设置彩蛋触发器
+        setTimeout(setupEasterEggTrigger, 2000);
+        
+        // 模态框关闭时停止烟花
+        document.addEventListener('DOMContentLoaded', function() {
+            const insightModal = document.getElementById('easterEggInsightModal');
+            if (insightModal) {
+                insightModal.addEventListener('hidden.bs.modal', stopFireworks);
+            }
+        });
     </script>
 </body>
 </html>
